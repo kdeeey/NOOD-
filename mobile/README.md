@@ -8,7 +8,7 @@ A student micro-job marketplace that connects university students with local fam
 
 The diagram below represents the complete MVP flow of the platform, from student onboarding through job completion and feedback collection.
 
-![MiniKhedma MVP Workflow](docs/minikhdma-mvp-workflow.png)
+![MiniKhedma MVP Workflow](../docs/minikhdma-mvp-workflow.png)
 
 ---
 
