@@ -2,7 +2,6 @@
 
 A student micro-job marketplace that connects university students with local families and small businesses seeking short-term help such as tutoring, babysitting, tech support, and errands.
 
----
 
 ## MVP Workflow
 
