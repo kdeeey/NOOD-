@@ -9,7 +9,7 @@ The diagram below represents the complete MVP flow of the platform, from student
 
 ![MiniKhedma MVP Workflow](../docs/minikhdma-mvp-workflow.png)
 
----
+
 
 ## MVP Scope Summary
 
@@ -31,7 +31,6 @@ The diagram below represents the complete MVP flow of the platform, from student
 | Willingness to rebook | 40-70% |
 | AI skill detection accuracy | 80% or higher (manual check) |
 
----
 
 ## MVP Features
 
@@ -63,7 +62,6 @@ The diagram below represents the complete MVP flow of the platform, from student
 - Report and block user functionality
 - WhatsApp support link for issue resolution
 
----
 
 ## System Components (MVP)
 
@@ -76,7 +74,6 @@ The diagram below represents the complete MVP flow of the platform, from student
 | Admin Dashboard | Internal web interface for manual student verification and platform moderation. |
 | Notification Service | Delivers push notifications to students when relevant job requests are posted nearby. |
 
----
 
 ## Technology Stack (Proposed)
 
@@ -90,7 +87,6 @@ The diagram below represents the complete MVP flow of the platform, from student
 | Notifications | Firebase Cloud Messaging |
 | Admin Dashboard | React or Next.js |
 
----
 
 ## Launch Strategy
 
@@ -98,8 +94,7 @@ The diagram below represents the complete MVP flow of the platform, from student
 2. Seed the first 20 clients from local families and small businesses near campus.
 3. Distribute the platform through campus WhatsApp groups and student associations.
 4. Manually seed early gigs if organic demand is insufficient during the initial launch period.
-
----
+   
 
 ## Key Design Decisions
 
@@ -111,7 +106,6 @@ The diagram below represents the complete MVP flow of the platform, from student
 | Scoped AI usage | AI is limited to skill extraction from the onboarding conversation and hourly rate suggestion; no autonomous matching or decision-making. |
 | Single campus focus | Concentrating on one university ecosystem allows tight feedback loops and manageable operational overhead. |
 
----
 
 ## Scope Control
 
