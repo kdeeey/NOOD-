@@ -127,7 +127,6 @@ NOOD gives students a private AI coach available on their phone at any time.
 ---
 
 ## System Architecture
-
 ```
 Mobile App (React Native / Expo)
         │
@@ -151,6 +150,9 @@ Mobile App (React Native / Expo)
 4. Microservice runs Whisper → filler detection → speed analysis → GPT-4o
 5. Results saved to PostgreSQL and returned to the app via Supabase Realtime
 6. Student sees score, feedback, and gamification updates
+
+### Full Sequence Diagram – Daily Practice + Interview Flow
+<image-card alt="NOOD Full Sequence Diagram" src="./diagrams/nood-daily-practice-sequence.svg" ></image-card>
 
 ---
 
