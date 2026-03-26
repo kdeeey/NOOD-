@@ -1,9 +1,11 @@
 
 """
 speech_analyzer.py
-───────────────────────────────────────────────────────────────────────────────
-Public speaking performance analyzer.
- 
+---------------------------------------------------------------------------
+Speech performance analyzer.
+
+Analyse ---> WPM, filler words, tone and energy variance
+
 Usage:
     python speech_analyzer.py path/to/audio.wav
     python speech_analyzer.py path/to/audio.wav --segment-duration 30
@@ -16,7 +18,7 @@ Models downloaded automatically on first run (~1-2 GB total):
     • speechbrain/vad-crdnn-libriparty          (VAD / pause detection)
     • speechbrain/asr-wav2vec2-commonvoice-en   (ASR / transcript)
     • speechbrain/emotion-recognition-wav2vec2-IEMOCAP  (vocal emotion)
-───────────────────────────────────────────────────────────────────────────────
+---------------------------------------------------------------------------
 """
  
 import argparse
