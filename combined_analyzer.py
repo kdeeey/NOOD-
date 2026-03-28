@@ -118,6 +118,32 @@ class VocabularyReport:
     suggestions: List[str]
 
 
+@dataclass
+class FluencyReport:
+    """Fluency and speech flow analysis report."""
+    repetition_count: int     # Number of unique repetitions detected
+    repetition_examples: List[Dict[str, any]]  # [{"word": "...", "count": N}, ...]
+    fluency_score: float      # 0-10 scale
+    fluency_level: str        # "poor", "fair", "good", "excellent"
+    primary_issues: List[str] # Main fluency problems identified
+    feedback: str
+    suggestions: List[str]
+
+
+@dataclass
+class LanguageAndContentReport:
+    """Consolidated Language & Content feedback combining all sub-analyses."""
+    grammar_score: float
+    sentence_structure_score: float
+    vocabulary_score: float
+    fluency_score: float
+    overall_language_score: float  # Weighted average of above 4
+    strengths: List[str]
+    areas_for_improvement: List[str]
+    top_recommendations: List[str]  # Prioritized action items
+    consolidated_feedback: str
+
+
 # ============================================================================
 # GRAMMAR CORRECTION MODULE
 # ============================================================================
@@ -675,11 +701,370 @@ def _generate_vocabulary_feedback(
 
 
 # ============================================================================
+# FLUENCY ANALYSIS MODULE
+# ============================================================================
+
+def analyze_fluency(transcript: str, verbose: bool = False) -> FluencyReport:
+    """
+    Analyze fluency and speech flow smoothness in transcript.
+    
+    Metrics:
+      - Word repetitions (how many times same words repeated)
+      - Fluency score based on repetition frequency
+      - Identification of primary fluency issues
+    
+    Args:
+        transcript: Full speech transcript text
+        verbose: Whether to print progress
+    
+    Returns:
+        FluencyReport object with repetition analysis and fluency score
+    """
+    if not transcript or len(transcript.strip()) == 0:
+        return FluencyReport(
+            repetition_count=0,
+            repetition_examples=[],
+            fluency_score=10.0,
+            fluency_level="excellent",
+            primary_issues=[],
+            feedback="No transcript provided for fluency analysis.",
+            suggestions=[],
+        )
+    
+    if verbose:
+        print("\n  Analyzing fluency…", flush=True)
+    
+    # Extract words
+    import re
+    words = re.findall(r'\b[a-z]+\b', transcript.lower())
+    
+    if len(words) == 0:
+        return FluencyReport(
+            repetition_count=0,
+            repetition_examples=[],
+            fluency_score=10.0,
+            fluency_level="excellent",
+            primary_issues=[],
+            feedback="No words found in transcript.",
+            suggestions=[],
+        )
+    
+    # Identify repetitions (words that appear very close together)
+    repetitions = {}
+    window_size = 20  # Check within 20-word windows
+    
+    for i in range(len(words) - window_size):
+        window = words[i:i + window_size]
+        word_counts = {}
+        for word in window:
+            # Skip very common filler words
+            if word not in {'the', 'a', 'an', 'is', 'are', 'was', 'were', 'be', 'and', 'or', 'but', 'in', 'on', 'at'}:
+                word_counts[word] = word_counts.get(word, 0) + 1
+        
+        # Flag words repeated 3+ times in a window
+        for word, count in word_counts.items():
+            if count >= 3:
+                if word not in repetitions:
+                    repetitions[word] = 0
+                repetitions[word] += 1
+    
+    # Sort by frequency
+    sorted_reps = sorted(repetitions.items(), key=lambda x: x[1], reverse=True)[:5]
+    repetition_examples = [{"word": word, "count": count} for word, count in sorted_reps]
+    repetition_count = len(repetitions)
+    
+    # Calculate fluency score (0-10)
+    # Fewer repetitions = higher fluency
+    rep_rate = repetition_count / max((len(words) / 20), 1)  # Normalize by 20-word chunks
+    fluency_score = max(0.0, 10.0 - (rep_rate * 2.0))
+    fluency_score = round(fluency_score, 1)
+    
+    # Determine fluency level
+    if fluency_score >= 8.5:
+        fluency_level = "excellent"
+    elif fluency_score >= 7.0:
+        fluency_level = "good"
+    elif fluency_score >= 5.0:
+        fluency_level = "fair"
+    else:
+        fluency_level = "poor"
+    
+    # Generate feedback
+    feedback, suggestions, primary_issues = _generate_fluency_feedback(
+        repetition_count, fluency_score, repetition_examples
+    )
+    
+    if verbose:
+        print(f"    Repetitions: {repetition_count}, Score: {fluency_score}/10, Level: {fluency_level}", flush=True)
+    
+    return FluencyReport(
+        repetition_count=repetition_count,
+        repetition_examples=repetition_examples,
+        fluency_score=fluency_score,
+        fluency_level=fluency_level,
+        primary_issues=primary_issues,
+        feedback=feedback,
+        suggestions=suggestions,
+    )
+
+
+def _generate_fluency_feedback(
+    repetition_count: int,
+    fluency_score: float,
+    examples: List[Dict[str, any]],
+) -> Tuple[str, List[str], List[str]]:
+    """Generate feedback and suggestions for fluency."""
+    suggestions = []
+    primary_issues = []
+    feedback_parts = []
+    
+    if fluency_score >= 8.5:
+        feedback_parts.append(f"Excellent fluency (score: {fluency_score}/10)")
+        suggestions.append("Your speech flows naturally with minimal repetition. Maintain this smooth delivery.")
+    elif fluency_score >= 7.0:
+        feedback_parts.append(f"Good fluency (score: {fluency_score}/10)")
+        feedback_parts.append(f"Some word repetition detected ({repetition_count} unique repeated words)")
+        primary_issues.append("Minor repetition patterns")
+        suggestions.append("Consider varying your word choices slightly to avoid repetition patterns.")
+        if examples:
+            suggestions.append(f"Watch out for repeating: {', '.join([e['word'] for e in examples[:2]])}")
+    elif fluency_score >= 5.0:
+        feedback_parts.append(f"Fair fluency (score: {fluency_score}/10)")
+        feedback_parts.append(f"Notable word repetition detected ({repetition_count} unique repeated words)")
+        primary_issues.append("Moderate repetition patterns")
+        primary_issues.append("Speech flow interrupted by repeated phrases")
+        suggestions.append("Reduce word repetitions by using synonyms or restructuring sentences.")
+        suggestions.append("Practice pausing naturally instead of repeating words for filler.")
+        if examples:
+            suggestions.append(f"Priority words to replace: {', '.join([e['word'] for e in examples[:3]])}")
+    else:
+        feedback_parts.append(f"Needs improvement ({fluency_score}/10)")
+        feedback_parts.append(f"Heavy repetition detected ({repetition_count} unique repeated words)")
+        primary_issues.append("Significant repetition throughout")
+        primary_issues.append("Flow frequently interrupted by repeated words/phrases")
+        suggestions.append("Record and listen to yourself—identify repetitive patterns.")
+        suggestions.append("Use synonyms or rephrase sentences to break repetition habits.")
+        suggestions.append("Practice slow, deliberate speech with intentional pauses.")
+    
+    feedback = ". ".join(feedback_parts) + "."
+    
+    return feedback, suggestions, primary_issues
+
+
+# ============================================================================
+# CONSOLIDATED LANGUAGE & CONTENT FEEDBACK
+# ============================================================================
+
+def generate_language_and_content_report(
+    grammar_report: GrammarReport,
+    sentence_structure_report: SentenceStructureReport,
+    vocabulary_report: VocabularyReport,
+    fluency_report: FluencyReport,
+) -> LanguageAndContentReport:
+    """
+    Generate consolidated Language & Content feedback combining all sub-analyses.
+    
+    Weighting (all equally weighted at 25% each):
+      - Grammar: 25%
+      - Sentence Structure: 25%
+      - Vocabulary: 25%
+      - Fluency: 25%
+    
+    Adjust weights below if needed:
+    """
+    # WEIGHT CONFIGURATION - Adjust these to change the importance of each component
+    GRAMMAR_WEIGHT = 0.25      # 25% - Grammatical correctness
+    STRUCTURE_WEIGHT = 0.25    # 25% - Sentence construction & variety
+    VOCABULARY_WEIGHT = 0.25   # 25% - Word choice & richness
+    FLUENCY_WEIGHT = 0.25      # 25% - Speech flow & smoothness
+    
+    # Convert sentence structure category to score (0-10)
+    structure_score = 7.0  # Default
+    if sentence_structure_report.sentence_length_category == "choppy":
+        structure_score = 6.0
+    elif sentence_structure_report.sentence_length_category == "balanced":
+        structure_score = 8.5
+    elif sentence_structure_report.sentence_length_category == "dense":
+        structure_score = 6.5
+    
+    # Adjust for variety level
+    if sentence_structure_report.variety_level == "low":
+        structure_score -= 1.5
+    elif sentence_structure_report.variety_level == "high":
+        structure_score += 0.5
+    
+    structure_score = max(0.0, min(10.0, structure_score))
+    
+    # Calculate overall language score
+    overall_score = (
+        grammar_report.grammar_score * GRAMMAR_WEIGHT +
+        structure_score * STRUCTURE_WEIGHT +
+        vocabulary_report.richness_score * VOCABULARY_WEIGHT +
+        fluency_report.fluency_score * FLUENCY_WEIGHT
+    )
+    overall_score = round(overall_score, 1)
+    
+    # Identify strengths and areas for improvement
+    strengths = []
+    areas_for_improvement = []
+    
+    if grammar_report.grammar_score >= 8.0:
+        strengths.append("Strong grammatical accuracy")
+    elif grammar_report.grammar_score < 6.0:
+        areas_for_improvement.append("Grammar needs attention (multiple errors detected)")
+    
+    if sentence_structure_report.variety_level == "high":
+        strengths.append("Excellent sentence variety and structure")
+    elif sentence_structure_report.variety_level == "low":
+        areas_for_improvement.append("Sentence structure lacks variety (repetitive patterns)")
+    
+    if vocabulary_report.vocabulary_level == "advanced":
+        strengths.append("Rich and sophisticated vocabulary")
+    elif vocabulary_report.vocabulary_level == "basic":
+        areas_for_improvement.append("Vocabulary is basic (limited word diversity)")
+    
+    if fluency_report.fluency_level == "excellent":
+        strengths.append("Excellent speech fluency and flow")
+    elif fluency_report.fluency_level in ["poor", "fair"]:
+        areas_for_improvement.append(f"Fluency issues ({', '.join(fluency_report.primary_issues)})")
+    
+    # Generate top recommendations (prioritized)
+    top_recommendations = []
+    
+    # Priority 1: Grammar errors
+    if grammar_report.grammar_score < 7.0:
+        top_recommendations.append(f"Priority: Fix grammar errors ({grammar_report.error_count} issues found)")
+    
+    # Priority 2: Fluency
+    if fluency_report.fluency_score < 7.0:
+        top_recommendations.append("Important: Reduce word repetitions (practice smoother delivery)")
+    
+    # Priority 3: Sentence structure
+    if sentence_structure_report.variety_level == "low":
+        top_recommendations.append("Vary your sentence lengths and structures")
+    
+    # Priority 4: Vocabulary
+    if vocabulary_report.vocabulary_level == "basic":
+        top_recommendations.append("Expand vocabulary with more precise and varied words")
+    
+    # Keep recommendations to top 3-4
+    top_recommendations = top_recommendations[:4]
+    
+    # Generate consolidated feedback message
+    feedback_lines = [
+        f"Overall Language & Content Score: {overall_score}/10"
+    ]
+    
+    if strengths:
+        feedback_lines.append(f"Strengths: {', '.join(strengths)}")
+    
+    if areas_for_improvement:
+        feedback_lines.append(f"Areas to improve: {', '.join(areas_for_improvement)}")
+    
+    consolidated_feedback = "\n".join(feedback_lines)
+    
+    return LanguageAndContentReport(
+        grammar_score=grammar_report.grammar_score,
+        sentence_structure_score=round(structure_score, 1),
+        vocabulary_score=vocabulary_report.richness_score,
+        fluency_score=fluency_report.fluency_score,
+        overall_language_score=overall_score,
+        strengths=strengths,
+        areas_for_improvement=areas_for_improvement,
+        top_recommendations=top_recommendations,
+        consolidated_feedback=consolidated_feedback,
+    )
+
+
+# ============================================================================
+# OVERALL CONFIDENCE SCORE CALCULATION
+# ============================================================================
+
+def calculate_overall_confidence_score(
+    language_and_content_score: float,
+    speech_metrics: Optional[Dict] = None,
+    body_language_metrics: Optional[Dict] = None,
+) -> Tuple[float, str, str]:
+    """
+    Calculate overall presentation confidence score (1-10).
+    
+    SCORING WEIGHTS:
+    - Language & Content: 25%   (Grammar, Sentence Structure, Vocabulary, Fluency)
+    - Speech Metrics:     40%   (WPM, filler rate, prosody, emotion)
+    - Body Language:      35%   (Emotions, confidence, gestures)
+    
+    Adjust weights below if needed. For example, to emphasize speech more:
+    Change to LANGUAGE_WEIGHT=0.20, SPEECH_WEIGHT=0.50, BODY_WEIGHT=0.30
+    """
+    # SCORE WEIGHT CONFIGURATION - Main tuning knobs
+    LANGUAGE_WEIGHT = 0.25   # 25% - Content quality
+    SPEECH_WEIGHT = 0.40     # 40% - Delivery & vocal performance
+    BODY_WEIGHT = 0.35       # 35% - Non-verbal communication
+    
+    # Start with language & content score
+    overall = language_and_content_score * LANGUAGE_WEIGHT
+    
+    # Add speech metrics (if available)
+    if speech_metrics and isinstance(speech_metrics, dict):
+        speech_score = speech_metrics.get('overall', 5.0)
+        if isinstance(speech_score, dict) and 'score' in speech_score:
+            speech_score = speech_score['score']
+        # Normalize speech score to 0-10 if needed
+        if speech_score < 0:
+            speech_score = (speech_score + 1) / 2 * 10  # Convert from [-1, 1] to [0, 10]
+        overall += (speech_score * SPEECH_WEIGHT)
+    else:
+        overall += (5.0 * SPEECH_WEIGHT)  # Neutral default
+    
+    # Add body language metrics (if available)
+    if body_language_metrics and isinstance(body_language_metrics, dict):
+        # Try to extract a confidence/score value
+        body_score = 5.0
+        if 'confidence' in body_language_metrics:
+            body_score = body_language_metrics['confidence'] * 10
+        elif 'score' in body_language_metrics:
+            body_score = body_language_metrics['score']
+        overall += (body_score * BODY_WEIGHT)
+    else:
+        overall += (5.0 * BODY_WEIGHT)  # Neutral default
+    
+    overall = round(min(10.0, max(0.0, overall)), 1)
+    
+    # Generate letter grade
+    if overall >= 9.0:
+        grade = "A+"
+        proficiency = "Excellent"
+    elif overall >= 8.0:
+        grade = "A"
+        proficiency = "Excellent"
+    elif overall >= 7.0:
+        grade = "B+"
+        proficiency = "Very Good"
+    elif overall >= 6.0:
+        grade = "B"
+        proficiency = "Good"
+    elif overall >= 5.0:
+        grade = "C+"
+        proficiency = "Satisfactory"
+    elif overall >= 4.0:
+        grade = "C"
+        proficiency = "Needs Improvement"
+    elif overall >= 3.0:
+        grade = "D"
+        proficiency = "Significant Work Needed"
+    else:
+        grade = "F"
+        proficiency = "Requires Major Revision"
+    
+    return overall, grade, proficiency
+
+
+# ============================================================================
 # COMBINED ANALYZER CLASS
 # ============================================================================
 
 class SpeechAndBodyLanguageAnalyzer:
-    """Main analyzer combining speech, body language, grammar, sentence structure, and vocabulary analysis."""
+    """Main analyzer combining speech, body language, grammar, sentence structure, vocabulary, and fluency."""
     
     def __init__(self, transcript: str = "", speech_report: Optional[dict] = None, 
                  body_language_report: Optional[dict] = None):
@@ -687,7 +1072,7 @@ class SpeechAndBodyLanguageAnalyzer:
         Initialize analyzer.
         
         Args:
-            transcript: Speech transcript (used for grammar, sentence structure, and vocabulary analysis)
+            transcript: Speech transcript (used for language & content analysis)
             speech_report: Pre-computed speech analysis report (optional)
             body_language_report: Pre-computed body language analysis report (optional)
         """
@@ -697,6 +1082,11 @@ class SpeechAndBodyLanguageAnalyzer:
         self.grammar_report = None
         self.sentence_structure_report = None
         self.vocabulary_report = None
+        self.fluency_report = None
+        self.language_and_content_report = None
+        self.overall_score = 0.0
+        self.overall_grade = ""
+        self.overall_proficiency = ""
     
     def analyze_grammar(self, verbose: bool = False) -> GrammarReport:
         """Analyze grammar in the transcript."""
@@ -734,6 +1124,18 @@ class SpeechAndBodyLanguageAnalyzer:
         
         return self.vocabulary_report
     
+    def analyze_fluency(self, verbose: bool = False) -> FluencyReport:
+        """Analyze fluency and speech smoothness in the transcript."""
+        print("\n══ Fluency Analysis starting…", flush=True)
+        t0 = __import__('time').time()
+        
+        self.fluency_report = analyze_fluency(self.transcript, verbose=verbose)
+        
+        elapsed = __import__('time').time() - t0
+        print(f"══ Fluency analysis done ({elapsed:.1f}s)", flush=True)
+        
+        return self.fluency_report
+    
     def analyze_speech(self) -> Dict:
         """
         Placeholder for speech analysis.
@@ -753,7 +1155,7 @@ class SpeechAndBodyLanguageAnalyzer:
     def run_analysis(self) -> Dict:
         """Run all analyses and generate combined report."""
         print("\n" + "=" * 70)
-        print("  COMBINED ANALYSIS - Speech, Body, Grammar, Structure, Vocabulary")
+        print("  COMPREHENSIVE COMMUNICATION ANALYSIS")
         print("=" * 70)
         
         # Run analyses
@@ -762,6 +1164,25 @@ class SpeechAndBodyLanguageAnalyzer:
         self.analyze_grammar(verbose=True)
         self.analyze_sentence_structure(verbose=True)
         self.analyze_vocabulary(verbose=True)
+        self.analyze_fluency(verbose=True)
+        
+        # Generate consolidated Language & Content report
+        if self.grammar_report and self.sentence_structure_report and \
+           self.vocabulary_report and self.fluency_report:
+            self.language_and_content_report = generate_language_and_content_report(
+                self.grammar_report,
+                self.sentence_structure_report,
+                self.vocabulary_report,
+                self.fluency_report,
+            )
+        
+        # Calculate overall confidence score
+        self.overall_score, self.overall_grade, self.overall_proficiency = \
+            calculate_overall_confidence_score(
+                self.language_and_content_report.overall_language_score if self.language_and_content_report else 5.0,
+                self.speech_report,
+                self.body_language_report,
+            )
         
         # Generate combined report
         report = self.generate_combined_report()
@@ -770,16 +1191,7 @@ class SpeechAndBodyLanguageAnalyzer:
     
     def generate_combined_report(self) -> Dict:
         """
-        Generate combined report with all analyses.
-        
-        Format:
-        - Speech Performance (WPM, filler rate, enthusiasm, etc.)
-        - Body Language (emotions, confidence)
-        - Language & Content:
-          - Grammar (errors, score)
-          - Sentence Structure (length, variety, suggestions)
-          - Vocabulary (richness, diversity, suggestions)
-        - Final Confidence Score
+        Generate comprehensive combined report with all analyses.
         """
         if self.grammar_report is None:
             self.analyze_grammar()
@@ -787,12 +1199,21 @@ class SpeechAndBodyLanguageAnalyzer:
             self.analyze_sentence_structure()
         if self.vocabulary_report is None:
             self.analyze_vocabulary()
+        if self.fluency_report is None:
+            self.analyze_fluency()
+        if self.language_and_content_report is None:
+            self.language_and_content_report = generate_language_and_content_report(
+                self.grammar_report,
+                self.sentence_structure_report,
+                self.vocabulary_report,
+                self.fluency_report,
+            )
         
-        # Build the combined report
+        # Build the comprehensive report
         report = {
             "meta": {
                 "generated_at": datetime.now().isoformat(),
-                "transcript_preview": self.transcript[:150] + ("…" if len(self.transcript) > 150 else ""),
+                "transcript_preview": self.transcript[:200] + ("…" if len(self.transcript) > 200 else ""),
             },
             "speech": self.speech_report,
             "body_language": self.body_language_report,
@@ -825,86 +1246,153 @@ class SpeechAndBodyLanguageAnalyzer:
                     "rare_words": self.vocabulary_report.rare_words_count,
                     "feedback": self.vocabulary_report.feedback,
                     "suggestions": self.vocabulary_report.suggestions,
+                },
+                "fluency": {
+                    "repetition_count": self.fluency_report.repetition_count,
+                    "repetition_examples": self.fluency_report.repetition_examples,
+                    "fluency_score": self.fluency_report.fluency_score,
+                    "fluency_level": self.fluency_report.fluency_level,
+                    "primary_issues": self.fluency_report.primary_issues,
+                    "feedback": self.fluency_report.feedback,
+                    "suggestions": self.fluency_report.suggestions,
+                },
+                "consolidated": {
+                    "grammar_score": self.language_and_content_report.grammar_score,
+                    "sentence_structure_score": self.language_and_content_report.sentence_structure_score,
+                    "vocabulary_score": self.language_and_content_report.vocabulary_score,
+                    "fluency_score": self.language_and_content_report.fluency_score,
+                    "overall_language_score": self.language_and_content_report.overall_language_score,
+                    "strengths": self.language_and_content_report.strengths,
+                    "areas_for_improvement": self.language_and_content_report.areas_for_improvement,
+                    "top_recommendations": self.language_and_content_report.top_recommendations,
+                    "feedback": self.language_and_content_report.consolidated_feedback,
                 }
             },
-            "final_confidence_score": 0.0,  # Placeholder for overall confidence
+            "overall_confidence_score": self.overall_score,
+            "overall_grade": self.overall_grade,
+            "overall_proficiency": self.overall_proficiency,
         }
         
         return report
     
     def print_summary(self):
-        """Print human-readable summary to console."""
-        if self.grammar_report is None or self.sentence_structure_report is None or self.vocabulary_report is None:
+        """Print professional, encouraging coach-style summary to console."""
+        if self.grammar_report is None or self.language_and_content_report is None:
             print("\n  [Warning] Not all analyses completed.")
             return
         
-        sep = "─" * 70
+        print(f"\n{'═' * 75}")
+        print("                    PRESENTATION ANALYSIS REPORT")
+        print(f"                        Professional Feedback")
+        print(f"{'═' * 75}")
         
-        print(f"\n{'=' * 70}")
-        print("  COMBINED ANALYSIS SUMMARY")
-        print(f"{'=' * 70}")
+        # Overall Score - Big and Prominent
+        print(f"\n  ╔═══════════════════════════════════════════════════════════════╗")
+        print(f"  ║                                                               ║")
+        print(f"  ║  OVERALL CONFIDENCE SCORE:  {self.overall_score}/10  ({self.overall_grade})                         ║")
+        print(f"  ║  PROFICIENCY: {self.overall_proficiency:<49} ║")
+        print(f"  ║                                                               ║")
+        print(f"  ╚═══════════════════════════════════════════════════════════════╝")
         
         # Speech section
         if self.speech_report:
             print(f"\n  ▸ Speech Performance")
-            print(f"    [Speech metrics would appear here]")
+            print(f"    [Voice quality, pace, and vocal delivery metrics]")
         
         # Body language section
         if self.body_language_report:
-            print(f"\n  ▸ Body Language")
-            print(f"    [Body language metrics would appear here]")
+            print(f"\n  ▸ Body Language & Non-Verbal Communication")
+            print(f"    [Posture, gestures, and visual presence metrics]")
         
-        # Language & Content section
-        print(f"\n  ▸ Language & Content")
+        # Language & Content - Main Focus
+        print(f"\n  ▸ LANGUAGE & CONTENT (Score: {self.language_and_content_report.overall_language_score}/10)")
+        print(f"    {'─' * 70}")
         
-        # Grammar subsection
-        print(f"\n    Grammar:")
-        print(f"      Errors detected      : {self.grammar_report.error_count}")
+        # Report grammar metrics
+        print(f"\n    ① Grammar Accuracy (Score: {self.grammar_report.grammar_score}/10)")
+        if self.grammar_report.error_count == 0:
+            print(f"       ✓ Excellent! No grammar errors detected.")
+        else:
+            print(f"       • {self.grammar_report.error_count} error(s) found")
+            if self.grammar_report.error_examples:
+                print(f"       Examples:")
+                for i, example in enumerate(self.grammar_report.error_examples[:2], 1):
+                    print(f"         {i}. \"{example['original']}\" → \"{example['corrected']}\"")
+        print(f"       Feedback: {self.grammar_report.feedback}")
         
-        if self.grammar_report.error_examples:
-            print(f"      Examples:")
-            for i, example in enumerate(self.grammar_report.error_examples, 1):
-                print(f"        {i}. \"{example['original']}\"")
-                print(f"           → \"{example['corrected']}\"")
-        
-        print(f"      Grammar score        : {self.grammar_report.grammar_score}/10")
-        print(f"      Feedback             : {self.grammar_report.feedback}")
-        
-        # Sentence structure subsection
-        print(f"\n    Sentence Structure:")
-        print(f"      Average length       : {self.sentence_structure_report.avg_sentence_length} words")
-        print(f"      Length variety       : {self.sentence_structure_report.sentence_length_std} σ ({self.sentence_structure_report.variety_level})")
-        print(f"      Total sentences      : {self.sentence_structure_report.total_sentences}")
-        print(f"      Short sentences      : {self.sentence_structure_report.short_sentences} (≤5 words)")
-        print(f"      Long sentences       : {self.sentence_structure_report.long_sentences} (≥20 words)")
-        print(f"      Category             : {self.sentence_structure_report.sentence_length_category}")
-        print(f"      Feedback             : {self.sentence_structure_report.feedback}")
-        
+        # Sentence structure
+        print(f"\n    ② Sentence Structure (Score: {self.language_and_content_report.sentence_structure_score}/10)")
+        print(f"       • Length: {self.sentence_structure_report.avg_sentence_length} words average")
+        print(f"       • Variety: {self.sentence_structure_report.variety_level.title()} (σ={self.sentence_structure_report.sentence_length_std})")
+        print(f"       • Pattern: {self.sentence_structure_report.sentence_length_category.title()}")
+        print(f"       Feedback: {self.sentence_structure_report.feedback}")
         if self.sentence_structure_report.suggestions:
-            print(f"      Suggestions:")
-            for i, suggestion in enumerate(self.sentence_structure_report.suggestions, 1):
-                print(f"        {i}. {suggestion}")
+            print(f"       →", self.sentence_structure_report.suggestions[0])
         
-        # Vocabulary subsection
-        print(f"\n    Vocabulary:")
-        print(f"      Total words          : {self.vocabulary_report.total_words}")
-        print(f"      Unique words         : {self.vocabulary_report.unique_words}")
-        print(f"      Type-Token Ratio     : {self.vocabulary_report.type_token_ratio:.3f}")
-        print(f"      Level                : {self.vocabulary_report.vocabulary_level}")
-        print(f"      Common words         : {self.vocabulary_report.common_words_count}")
-        print(f"      Rare words           : {self.vocabulary_report.rare_words_count}")
-        print(f"      Richness score       : {self.vocabulary_report.richness_score}/10")
-        print(f"      Feedback             : {self.vocabulary_report.feedback}")
-        
+        # Vocabulary
+        print(f"\n    ③ Vocabulary & Word Choice (Score: {self.vocabulary_report.richness_score}/10)")
+        print(f"       • Level: {self.vocabulary_report.vocabulary_level.title()}")
+        print(f"       • Diversity: TTR = {self.vocabulary_report.type_token_ratio:.3f}")
+        print(f"       • Word Count: {self.vocabulary_report.unique_words} unique / {self.vocabulary_report.total_words} total")
+        print(f"       Feedback: {self.vocabulary_report.feedback}")
         if self.vocabulary_report.suggestions:
-            print(f"      Suggestions:")
-            for i, suggestion in enumerate(self.vocabulary_report.suggestions, 1):
-                print(f"        {i}. {suggestion}")
+            print(f"       →", self.vocabulary_report.suggestions[0])
         
-        print(f"\n  ▸ Final Confidence Score")
-        print(f"    [Overall confidence score would appear here]")
+        # Fluency
+        print(f"\n    ④ Fluency & Flow (Score: {self.fluency_report.fluency_score}/10)")
+        print(f"       • Level: {self.fluency_report.fluency_level.title()}")
+        print(f"       • Repetitions Detected: {self.fluency_report.repetition_count}")
+        if self.fluency_report.repetition_examples:
+            reps = ', '.join([f"{e['word']} ({e['count']}x)" for e in self.fluency_report.repetition_examples[:3]])
+            print(f"       Notable repetitions: {reps}")
+        print(f"       Feedback: {self.fluency_report.feedback}")
+        if self.fluency_report.suggestions:
+            print(f"       →", self.fluency_report.suggestions[0])
         
-        print(f"\n{'=' * 70}\n")
+        # Strengths
+        print(f"\n  ▸ KEY STRENGTHS")
+        print(f"    {'─' * 70}")
+        if self.language_and_content_report.strengths:
+            for i, strength in enumerate(self.language_and_content_report.strengths, 1):
+                print(f"    ✓ {strength}")
+        else:
+            print(f"    [Continue working on all areas]")
+        
+        # Areas for improvement
+        print(f"\n  ▸ AREAS FOR IMPROVEMENT")
+        print(f"    {'─' * 70}")
+        if self.language_and_content_report.areas_for_improvement:
+            for i, area in enumerate(self.language_and_content_report.areas_for_improvement, 1):
+                print(f"    • {area}")
+        else:
+            print(f"    [Great work! Maintain your current performance]")
+        
+        # Top recommendations
+        print(f"\n  ▸ TOP RECOMMENDED ACTIONS (Prioritized)")
+        print(f"    {'─' * 70}")
+        if self.language_and_content_report.top_recommendations:
+            for i, rec in enumerate(self.language_and_content_report.top_recommendations, 1):
+                print(f"    {i}. {rec}")
+        else:
+            print(f"    You're doing great! Keep refining your presentation skills.")
+        
+        # Closing coach-style message
+        print(f"\n  ▸ COACH'S SUMMARY")
+        print(f"    {'─' * 70}")
+        if self.overall_score >= 8.0:
+            print(f"    Excellent work! Your presentation demonstrates strong command of the")
+            print(f"    material and clear communication. You're well-prepared and confident.")
+            print(f"    Focus on fine-tuning the details for an even more polished delivery.")
+        elif self.overall_score >= 6.0:
+            print(f"    Good effort! You have a solid foundation. By addressing the areas")
+            print(f"    highlighted above, your next presentation will be significantly stronger.")
+            print(f"    Focus on your top recommended actions for the most impact.")
+        else:
+            print(f"    Keep practicing! You have room to grow. Focus on the recommended actions")
+            print(f"    in order to build your presentation skills. Each practice session will")
+            print(f"    help you improve. You've got this!")
+        
+        print(f"\n{'═' * 75}\n")
 
 
 # ============================================================================
@@ -946,20 +1434,40 @@ def main():
     args = parser.parse_args()
     
     # Load transcript
-    if Path(args.transcript).exists():
-        with open(args.transcript, "r", encoding="utf-8") as f:
-            transcript = f.read()
+    transcript = None
+    input_path = Path(args.transcript)
+    
+    if input_path.exists():
+        # Check if it's a video/audio file (not a text transcript)
+        audio_video_extensions = {'.mp4', '.mp3', '.wav', '.m4a', '.flac', '.aac', '.mov', '.avi'}
+        if input_path.suffix.lower() in audio_video_extensions:
+            print(f"\n✗ Error: '{args.transcript}' is a media file, not a transcript.")
+            print(f"  Please extract the transcript first using speech_analyzer.py")
+            print(f"  Then run: python combined_analyzer.py --transcript transcript.txt --output report.json")
+            sys.exit(1)
+        
+        # Try to read as text transcript
+        try:
+            with open(args.transcript, "r", encoding="utf-8") as f:
+                transcript = f.read()
+        except UnicodeDecodeError:
+            print(f"\n✗ Error: Could not read '{args.transcript}' as text.")
+            print(f"  Make sure the file is a valid UTF-8 encoded text transcript.")
+            sys.exit(1)
     else:
+        # Treat input as raw text
         transcript = args.transcript
+    
+    if not transcript or not transcript.strip():
+        print("\n✗ Error: Transcript is empty.")
+        sys.exit(1)
+    
     
     # Run analysis
     analyzer = SpeechAndBodyLanguageAnalyzer(transcript=transcript)
     
-    # Run grammar analysis (main feature)
-    analyzer.analyze_grammar(verbose=args.verbose)
-    
-    # Generate report
-    report = analyzer.generate_combined_report()
+    # Run complete analysis (grammar, sentence structure, vocabulary, fluency)
+    report = analyzer.run_analysis()
     
     # Output results
     if args.json or args.output:
@@ -967,7 +1475,7 @@ def main():
             json.dump(report, f, indent=2, ensure_ascii=False)
         print(f"\n✓ Report saved to: {args.output}")
     
-    # Print summary to console
+    # Print professional summary to console
     analyzer.print_summary()
     
     return report
