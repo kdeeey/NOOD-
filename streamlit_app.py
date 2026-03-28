@@ -152,8 +152,8 @@ def display_section_subheader(title: str):
 # ============================================================================
 
 # Header
-st.title("🎤 NOOD - Public Speaking Coach")
-st.markdown("**Upload your presentation video and get instant feedback**")
+st.markdown("<h1 style='text-align: center;'>🎤 NOOD - Public Speaking Coach</h1>", unsafe_allow_html=True)
+st.markdown("<p style='text-align: center;'><b>Upload your presentation video and get instant feedback</b></p>", unsafe_allow_html=True)
 st.markdown("---")
 
 # File uploader
