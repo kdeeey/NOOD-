@@ -324,17 +324,28 @@ def analyze_tone(
         print(f"  Model : {model}", flush=True)
  
     user_msg = build_user_message(report_dict)
- 
+
     if verbose:
         print("  Calling Pollinations AI…", flush=True)
- 
-    raw = call_pollinations(user_msg, model=model)
- 
-    if verbose:
-        print("  Parsing response…", flush=True)
- 
-    tone_report = parse_llm_response(raw, model)
- 
+
+    try:
+        raw = call_pollinations(user_msg, model=model)
+        if verbose:
+            print("  Parsing response…", flush=True)
+        tone_report = parse_llm_response(raw, model)
+    except Exception as e:
+        print(f"  [Tone warning] API failed: {e} — using fallback", flush=True)
+        tone_report = ToneReport(
+            detected_topic="General presentation",
+            detected_context="Professional presentation",
+            overall_tone_fit="appropriate",
+            tone_fit_score=0.7,
+            mismatches=[],
+            coaching_tips=["Focus on maintaining consistent energy throughout your presentation."],
+            model_used="fallback",
+            raw_response=""
+        )
+
     return tone_report
  
  

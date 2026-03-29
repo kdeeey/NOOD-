@@ -329,7 +329,7 @@ def run_pipeline(
         audio_path = extract_audio(video_path, tmp_audio)
     except RuntimeError as e:
         print(f"\n  [ERROR] {e}", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError("Pipeline failed: audio extraction failed")
 
     #parallel analysis
     body_result = None
@@ -359,7 +359,7 @@ def run_pipeline(
     if body_result is None or speech_tone_result is None:
         print("\n  [FATAL] One or more analyzers failed. Cannot produce report.",
               file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError("Pipeline failed: one or more analyzers failed")
 
     #scoring
     body_score = compute_body_language_score(body_result["summary"])

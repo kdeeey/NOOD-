@@ -1,10 +1,38 @@
-streamlit>=1.28.0
-torch>=2.0.0
-torchaudio>=2.0.0
-transformers>=4.30.0
-numpy>=1.24.0
-scipy>=1.10.0
+# =============================================================================
+# NOOD Presentation Analyzer — Pinned Dependencies
+# =============================================================================
+# Tested on: Python 3.11 Windows
+#
+# IMPORTANT: Install in this order to avoid conflicts:
+#   pip install -r requirements.txt
+#
+# These versions are known to work together. Do not upgrade torch/torchaudio
+# without testing SpeechBrain compatibility.
+# =============================================================================
+
+# --- Core ML (must be installed first, in order) ---
+numpy>=1.24.0,<2.0.0
+torch==2.1.2
+torchaudio==2.1.2
+torchvision==0.16.2
+
+# --- SpeechBrain ecosystem (order matters) ---
+huggingface_hub==0.23.0
+hyperpyyaml==1.2.2
+speechbrain==0.5.15
+transformers==4.40.2
+tokenizers==0.19.1
+
+# --- Audio processing ---
 librosa>=0.10.0
 soundfile>=0.12.0
-speechbrain>=0.5.13
+scipy>=1.10.0
+
+# --- Computer vision (body language detection) ---
+opencv-python>=4.8.0,<4.10.0
+opencv-contrib-python>=4.8.0,<4.10.0
+mediapipe>=0.10.0
+
+# --- Web UI ---
+streamlit>=1.28.0
 gradio>=3.40.0

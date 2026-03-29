@@ -8,20 +8,33 @@ Usage:
     python speech_analyzer.py path/to/audio.wav
     python speech_analyzer.py path/to/audio.wav --segment-duration 30
     python speech_analyzer.py path/to/audio.wav --json
- 
+
 Dependencies:
     pip install speechbrain librosa numpy scipy torch torchaudio
- 
+
 Models downloaded automatically on first run (~1-2 GB total):
     • speechbrain/vad-crdnn-libriparty          (VAD / pause detection)
     • speechbrain/asr-wav2vec2-commonvoice-en   (ASR / transcript)
     • speechbrain/emotion-recognition-wav2vec2-IEMOCAP  (vocal emotion)
 ---------------------------------------------------------------------------
 """
- 
+
+# ---------------------------------------------------------------------------
+# torchaudio 2.2+ compat: patch missing backend API before SpeechBrain loads
+# ---------------------------------------------------------------------------
+import sys
+from pathlib import Path as _Path
+_PROJECT_ROOT = _Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+import compat.torchaudio_compat  # noqa: F401 E402 — must run before speechbrain
+# ---------------------------------------------------------------------------
+
 import argparse
 import json
+import os
 import sys
+import tempfile
 import warnings
 from dataclasses import dataclass, asdict
 from pathlib import Path
@@ -30,7 +43,7 @@ from typing import Optional
 import librosa
 import numpy as np
 import torch
-import torchaudio
+import soundfile as sf
 from scipy.interpolate import interp1d
  
 warnings.filterwarnings("ignore")
@@ -157,8 +170,8 @@ EMOTION_FEEDBACK = {
  
 #model loaders
 _vad_model = None
-_asr_model = None
-_emotion_model = None
+_whisper_pipe = None
+_emotion_pipe = None
  
  
 def load_vad():
@@ -174,48 +187,49 @@ def load_vad():
  
  
 def load_asr():
-    global _asr_model
-    if _asr_model is None:
-        from speechbrain.pretrained import EncoderDecoderASR
-        print("  Loading ASR model…", flush=True)
-        _asr_model = EncoderDecoderASR.from_hparams(
-            source="speechbrain/asr-wav2vec2-commonvoice-en",
-            savedir="pretrained_models/asr",
+    global _whisper_pipe
+    if _whisper_pipe is None:
+        from transformers import pipeline
+        print("  Loading Whisper model...", flush=True)
+        _whisper_pipe = pipeline(
+            "automatic-speech-recognition",
+            model="openai/whisper-base",
+            device="cpu"
         )
-    return _asr_model
+    return _whisper_pipe
  
  
 def load_emotion():
-    global _emotion_model
-    if _emotion_model is None:
-        from speechbrain.pretrained import EncoderClassifier
-        print("  Loading emotion model…", flush=True)
-        _emotion_model = EncoderClassifier.from_hparams(
-            source="speechbrain/emotion-recognition-wav2vec2-IEMOCAP",
-            savedir="pretrained_models/emotion",
+    global _emotion_pipe
+    if _emotion_pipe is None:
+        from transformers import pipeline
+        print("  Loading emotion model...", flush=True)
+        _emotion_pipe = pipeline(
+            "audio-classification",
+            model="ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition",
+            framework="pt",
+            device="cpu"
         )
-    return _emotion_model
+    return _emotion_pipe
  
  
 #audio utilities
 def load_audio_16k(path: str):
     """Load audio and resample to 16 kHz mono (required by SpeechBrain models)."""
-    waveform, sr = torchaudio.load(path)
-    if waveform.shape[0] > 1:
-        waveform = waveform.mean(dim=0, keepdim=True)  # stereo → mono
-    if sr != 16000:
-        resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=16000)
-        waveform = resampler(waveform)
+    y, _ = librosa.load(path, sr=16000, mono=True)
+    waveform = torch.tensor(y).unsqueeze(0)
     return waveform, 16000
  
  
 def save_tmp_wav(waveform: torch.Tensor, sr: int, path: str):
-    torchaudio.save(path, waveform, sr)
+    import soundfile as sf
+    sf.write(path, waveform.squeeze().numpy(), sr)
  
  
-# Stage 1: VAD ---> speech boundaries + pause stats 
+# Stage 1: VAD ---> speech boundaries + pause stats
 def analyze_pauses(audio_path: str, total_duration: float):
     """Returns pause_ratio and list of pause durations."""
+    audio_path = audio_path.replace('\\', '/')
     vad = load_vad()
     boundaries = vad.get_speech_segments(audio_path)
  
@@ -244,24 +258,20 @@ FILLER_WORDS = {
  
 def analyze_speech_content(audio_path: str, total_duration_minutes: float):
     """Returns wpm, filler_rate, transcript string."""
-    asr = load_asr()
- 
+    audio_path = audio_path.replace('\\', '/')
+    pipe = load_asr()
+
     try:
-        transcripts = asr.transcribe_file(audio_path)
-        if isinstance(transcripts, (list, tuple)):
-            transcript = transcripts[0] if transcripts else ""
-        else:
-            transcript = str(transcripts)
+        result = pipe(audio_path)
+        transcript = result.get("text", "") if isinstance(result, dict) else str(result)
     except Exception as e:
-        print(f"  [ASR warning] {e} — continuing with empty transcript.", flush=True)
+        print(f"  [ASR warning] {e}", flush=True)
         transcript = ""
- 
+
     words = [w for w in transcript.lower().split() if w.strip()]
     total_words = len(words)
- 
     wpm = total_words / max(total_duration_minutes, 1e-9)
- 
-    #count filler tokens (single-word and two-word phrases)
+
     filler_count = 0
     for i, word in enumerate(words):
         if word in FILLER_WORDS:
@@ -270,9 +280,8 @@ def analyze_speech_content(audio_path: str, total_duration_minutes: float):
             bigram = word + " " + words[i + 1]
             if bigram in FILLER_WORDS:
                 filler_count += 1
- 
+
     filler_rate = filler_count / max(total_words, 1)
- 
     return wpm, filler_rate, transcript
  
  
@@ -310,16 +319,27 @@ def analyze_prosody(audio_path: str):
     return pitch_std, energy_std
  
  
-# Stage 4: Vocal emotion (SpeechBrain wav2vec2 IEMOCAP)
+# Stage 4: Vocal emotion (wav2vec2 emotion recognition)
 def analyze_emotion(audio_path: str) -> tuple[str, float]:
     """Returns (emotion_label, confidence 0–1)."""
-    emotion_model = load_emotion()
+    audio_path = audio_path.replace('\\', '/')
     try:
-        out_probs, score, _, label = emotion_model.classify_file(audio_path)
-        # label is a list; take first element
-        label_str = label[0] if isinstance(label, (list, tuple)) else str(label)
-        confidence = float(score[0]) if hasattr(score, "__len__") else float(score)
-        return label_str, confidence
+        pipe = load_emotion()
+        results = pipe(audio_path)
+        if results:
+            top = results[0]
+            label = top["label"].lower()
+            score = float(top["score"])
+            # Map to EMOTION_FEEDBACK keys
+            label_map = {
+                "happy": "hap", "sad": "sad",
+                "angry": "ang", "neutral": "neu",
+                "fear": "ang", "disgust": "ang",
+                "surprise": "hap"
+            }
+            mapped = label_map.get(label, "neu")
+            return mapped, score
+        return "neu", 0.5
     except Exception as e:
         print(f"  [Emotion warning] {e}", flush=True)
         return "neu", 0.5
@@ -330,33 +350,42 @@ def analyze(audio_path: str) -> SpeechReport:
     path = Path(audio_path)
     if not path.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
- 
+
     print(f"\n── Analyzing: {path.name} ──")
- 
+
     # Load once for duration; 16k version saved for SpeechBrain
     y_native, sr_native = librosa.load(str(path), sr=None, mono=True)
     total_duration = len(y_native) / sr_native
     total_duration_minutes = total_duration / 60.0
- 
-    # SpeechBrain needs 16 kHz wav — write a temp file if needed
-    tmp_path = str(path.with_suffix("")) + "_16k_tmp.wav"
-    waveform_16k, _ = load_audio_16k(str(path))
-    save_tmp_wav(waveform_16k, 16000, tmp_path)
- 
-    print("  [1/4] VAD + pause analysis…", flush=True)
-    pause_ratio, pauses, _ = analyze_pauses(tmp_path, total_duration)
- 
-    print("  [2/4] ASR + filler detection…", flush=True)
-    wpm, filler_rate, transcript = analyze_speech_content(tmp_path, total_duration_minutes)
- 
-    print("  [3/4] Prosody (pitch + energy)…", flush=True)
-    pitch_std, energy_std = analyze_prosody(str(path))   # use native sr for librosa
- 
-    print("  [4/4] Vocal emotion…", flush=True)
-    emotion_label, emotion_confidence = analyze_emotion(tmp_path)
- 
 
-    Path(tmp_path).unlink(missing_ok=True)
+    # SpeechBrain needs 16 kHz wav — create temp file with proper path
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".wav", prefix="nood_16k_")
+    os.close(tmp_fd)
+    tmp_path = str(Path(tmp_path).resolve())
+    tmp_path = tmp_path.replace('\\', '/')
+    print(f"  tmp_path: {tmp_path}", flush=True)
+
+    try:
+        waveform_16k, _ = load_audio_16k(str(path))
+        save_tmp_wav(waveform_16k, 16000, tmp_path)
+
+        print("  [1/4] VAD + pause analysis…", flush=True)
+        pause_ratio, pauses, _ = analyze_pauses(tmp_path, total_duration)
+
+        print("  [2/4] ASR + filler detection…", flush=True)
+        wpm, filler_rate, transcript = analyze_speech_content(tmp_path, total_duration_minutes)
+
+        print("  [3/4] Prosody (pitch + energy)…", flush=True)
+        pitch_std, energy_std = analyze_prosody(str(path))   # use native sr for librosa
+
+        print("  [4/4] Vocal emotion…", flush=True)
+        emotion_label, emotion_confidence = analyze_emotion(tmp_path)
+    finally:
+        # Clean up temp file
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
  
  
     wpm_score     = bell_score(wpm, ideal=145, std=28)
@@ -467,7 +496,7 @@ def analyze_segments(audio_path: str, segment_duration: int = 30) -> list:
         # Write temp chunk
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
             tmp = f.name
-        torchaudio.save(tmp, torch.tensor(chunk).unsqueeze(0), sr)
+        sf.write(tmp, chunk, sr)
  
         try:
             pitch_std, energy_std = analyze_prosody(tmp)

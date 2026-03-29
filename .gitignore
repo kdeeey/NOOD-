@@ -1,2 +1,20 @@
 model_checkpoints
 venv
+# Python
+__pycache__/
+*.pyc
+
+# Models
+pretrained_models/
+pretrained_model_checkpoints/
+
+# Audio / temp
+*.wav
+*.mp4
+
+# Env
+.env
+
+# OS
+.DS_Store
+Thumbs.db

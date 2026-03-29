@@ -17,13 +17,21 @@ Models Used:
 import os
 import sys
 import argparse
+from pathlib import Path
+
+# ---------------------------------------------------------------------------
+# torchaudio 2.2+ compat: patch missing backend API before SpeechBrain loads
+# ---------------------------------------------------------------------------
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+import compat.torchaudio_compat  # noqa: F401 E402
+# ---------------------------------------------------------------------------
+
 import librosa
 import numpy as np
 import torch
-import torchaudio
-import torchaudio.transforms as T
 import soundfile as sf
-from pathlib import Path
 from typing import Tuple, Dict, List
 import gradio as gr
 from transformers import AutoModelForSpeechSeq2Seq, AutoProcessor, pipeline
