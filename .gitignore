@@ -1,20 +1,36 @@
-model_checkpoints
-venv
-# Python
+# ---- Python ----
 __pycache__/
-*.pyc
-
-# Models
-pretrained_models/
-pretrained_model_checkpoints/
-
-# Audio / temp
-*.wav
-*.mp4
-
-# Env
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
 .env
 
-# OS
+# ---- ML model caches (downloaded at runtime, can be GBs) ----
+hf_cache/
+pretrained_models/
+pretrained_model_checkpoints/
+Body Analysis/mediapipe_models/
+
+# ---- Local test media / samples (keep code, ignore binaries) ----
+samples/*.mp4
+samples/*.wav
+samples/*.mkv
+samples/*.mov
+samples/*.webm
+*.wav
+*.mp4
+*.mkv
+*.mov
+
+# ---- Generated reports (samples in data/ are tracked, scratch ones ignored) ----
+*_report.json
+!data/*.json
+
+# ---- IDE / OS ----
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
+*.tmp
+*.swp

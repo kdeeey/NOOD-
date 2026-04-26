@@ -29,7 +29,7 @@ function LangToggle() {
         padding: "5px 11px", borderRadius: 999, cursor: "pointer",
         textTransform: "uppercase", letterSpacing: "0.08em", transition: "all 0.15s"
       }}>
-          {l === "en" ? "FR" : l}
+          {l.toUpperCase()}
         </button>
       )}
     </div>);

@@ -22,11 +22,23 @@ Models downloaded automatically on first run (~1-2 GB total):
 # ---------------------------------------------------------------------------
 # torchaudio 2.2+ compat: patch missing backend API before SpeechBrain loads
 # ---------------------------------------------------------------------------
+import os
 import sys
 from pathlib import Path as _Path
 _PROJECT_ROOT = _Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
+
+# Redirect HuggingFace cache to a project-local folder. The user-profile cache
+# (~/.cache/huggingface) has persistent corruption issues on this Windows
+# install (likely OneDrive sync / antivirus). Must be set BEFORE any
+# huggingface_hub or transformers import.
+_HF_CACHE = _PROJECT_ROOT / "hf_cache"
+_HF_CACHE.mkdir(parents=True, exist_ok=True)
+os.environ.setdefault("HF_HOME", str(_HF_CACHE))
+os.environ.setdefault("HF_HUB_CACHE", str(_HF_CACHE / "hub"))
+os.environ.setdefault("TRANSFORMERS_CACHE", str(_HF_CACHE / "transformers"))
+
 import compat.torchaudio_compat  # noqa: F401 E402 — must run before speechbrain
 # ---------------------------------------------------------------------------
 
@@ -169,21 +181,8 @@ EMOTION_FEEDBACK = {
  
  
 #model loaders
-_vad_model = None
 _whisper_pipe = None
 _emotion_pipe = None
- 
- 
-def load_vad():
-    global _vad_model
-    if _vad_model is None:
-        from speechbrain.pretrained import VAD
-        print("  Loading VAD model…", flush=True)
-        _vad_model = VAD.from_hparams(
-            source="speechbrain/vad-crdnn-libriparty",
-            savedir="pretrained_models/vad",
-        )
-    return _vad_model
  
  
 def load_asr():
@@ -226,25 +225,34 @@ def save_tmp_wav(waveform: torch.Tensor, sr: int, path: str):
     sf.write(path, waveform.squeeze().numpy(), sr)
  
  
-# Stage 1: VAD ---> speech boundaries + pause stats
+# Stage 1: VAD ---> speech boundaries + pause stats (librosa energy-based)
 def analyze_pauses(audio_path: str, total_duration: float):
-    """Returns pause_ratio and list of pause durations."""
+    """
+    Returns pause_ratio and list of pause durations.
+
+    Uses librosa's energy-based silence detection (top_db=30) instead of a
+    neural VAD. Faster, no model download, and avoids the SpeechBrain /
+    hyperpyyaml version conflict that breaks vad-crdnn-libriparty on Windows.
+    """
     audio_path = audio_path.replace('\\', '/')
-    vad = load_vad()
-    boundaries = vad.get_speech_segments(audio_path)
- 
+    y, sr = librosa.load(audio_path, sr=16000, mono=True)
+
+    # librosa.effects.split returns non-silent intervals as sample indices
+    intervals = librosa.effects.split(
+        y, top_db=30, frame_length=2048, hop_length=512
+    )
+    boundaries = [(start / sr, end / sr) for start, end in intervals]
+
     pauses = []
     for i in range(1, len(boundaries)):
-        gap = float(boundaries[i][0]) - float(boundaries[i - 1][1])
+        gap = boundaries[i][0] - boundaries[i - 1][1]
         if gap > 0.15:          #(< 150ms are breath noise)
             pauses.append(gap)
- 
-    speech_duration = sum(
-        float(b[1]) - float(b[0]) for b in boundaries
-    )
-    silence_duration = total_duration - speech_duration
+
+    speech_duration = sum(end - start for start, end in boundaries)
+    silence_duration = max(0.0, total_duration - speech_duration)
     pause_ratio = silence_duration / max(total_duration, 1e-9)
- 
+
     return pause_ratio, pauses, boundaries
  
  

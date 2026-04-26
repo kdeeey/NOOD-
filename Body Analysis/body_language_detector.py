@@ -46,6 +46,7 @@ CLASS_NAMES = [
     "Sad",
     "Surprised",
     "Tension",
+    "Neutral",
 ]
 
 

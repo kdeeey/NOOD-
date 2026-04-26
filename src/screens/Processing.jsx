@@ -2,37 +2,126 @@
 
 function Processing({ onNav }) {
   const { t, lang } = useT();
-  const [elapsed, setElapsed] = useState(0);
-  const total = 60; // seconds simulated
+  const [elapsed, setElapsed]     = useState(0);
+  const [apiStatus, setApiStatus] = useState("idle");   // idle | demo | uploading | polling | done | error
+  const [errorMsg, setErrorMsg]   = useState(null);
+  const [transcript, setTranscript] = useState(null);   // real transcript when job finishes
+  const total = 60; // seconds — drives the stage animations (visual only)
 
   const stages = [
-    { key: "audio",   icon: "graphic_eq",       at: 0,    dur: 4,  track: "voice", label: t("proc.stage.audio") },
-    { key: "vad",     icon: "pause",            at: 4,    dur: 6,  track: "voice", label: t("proc.stage.vad") },
-    { key: "asr",     icon: "transcribe",       at: 10,   dur: 14, track: "voice", label: t("proc.stage.asr") },
-    { key: "prosody", icon: "tune",             at: 24,   dur: 8,  track: "voice", label: t("proc.stage.prosody") },
+    { key: "audio",   icon: "graphic_eq",          at: 0,  dur: 4,  track: "voice", label: t("proc.stage.audio") },
+    { key: "vad",     icon: "pause",               at: 4,  dur: 6,  track: "voice", label: t("proc.stage.vad") },
+    { key: "asr",     icon: "transcribe",          at: 10, dur: 14, track: "voice", label: t("proc.stage.asr") },
+    { key: "prosody", icon: "tune",                at: 24, dur: 8,  track: "voice", label: t("proc.stage.prosody") },
     { key: "vocal",   icon: "sentiment_satisfied", at: 32, dur: 6,  track: "voice", label: t("proc.stage.vocal") },
-    { key: "tone",    icon: "auto_awesome",     at: 38,   dur: 12, track: "voice", label: t("proc.stage.tone") },
-    { key: "body",    icon: "accessibility_new",at: 0,    dur: 36, track: "body",  label: t("proc.stage.body") },
-    { key: "score",   icon: "scoreboard",       at: 50,   dur: 10, track: "all",   label: t("proc.stage.score") },
+    { key: "tone",    icon: "auto_awesome",        at: 38, dur: 12, track: "voice", label: t("proc.stage.tone") },
+    { key: "body",    icon: "accessibility_new",   at: 0,  dur: 36, track: "body",  label: t("proc.stage.body") },
+    { key: "score",   icon: "scoreboard",          at: 50, dur: 10, track: "all",   label: t("proc.stage.score") },
   ];
 
   useEffect(() => {
-    const id = setInterval(() => setElapsed(e => {
-      if (e >= total) { clearInterval(id); setTimeout(() => onNav("report"), 500); return total; }
-      return e + 0.25;
-    }), 100);
-    return () => clearInterval(id);
+    const file = window.PENDING_FILE;
+    const API  = window.API_BASE || 'http://localhost:8000';
+
+    // Elapsed counter — drives stage animations regardless of mode
+    const elapsedId = setInterval(() => setElapsed(e => Math.min(e + 0.25, total * 2)), 100);
+
+    if (!file) {
+      // ── Demo mode: fake 60 s then show mock report ─────────────────────────
+      setApiStatus("demo");
+      const demoTimer = setTimeout(() => onNav("report"), total * 1000);
+      return () => { clearInterval(elapsedId); clearTimeout(demoTimer); };
+    }
+
+    // ── Real mode: upload → poll → navigate ────────────────────────────────
+    let cancelled = false;
+    let pollTimer = null;
+    setApiStatus("uploading");
+
+    const run = async () => {
+      try {
+        // 1. Upload the video
+        const form = new FormData();
+        form.append('file', file);
+        form.append('segment_duration', '30');
+        const upRes = await fetch(`${API}/api/analyze`, { method: 'POST', body: form });
+        if (!upRes.ok) throw new Error(`Upload error ${upRes.status}`);
+        const { job_id } = await upRes.json();
+
+        if (cancelled) return;
+        setApiStatus("polling");
+
+        // 2. Poll every 2 s until done or failed
+        const poll = async () => {
+          if (cancelled) return;
+          try {
+            const res = await fetch(`${API}/api/analyze/${job_id}`);
+            const job = await res.json();
+            if (job.status === 'done') {
+              const liveReport = window.mapApiReport(job.report, {
+                fileName: file.name,
+                fileSize: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
+              });
+              window.LIVE_REPORT = liveReport;
+              if (!cancelled) {
+                setTranscript(liveReport.speech.transcript_preview);
+                setApiStatus("done");
+                setTimeout(() => { if (!cancelled) onNav('report'); }, 900);
+              }
+            } else if (job.status === 'failed') {
+              if (!cancelled) { setErrorMsg(job.error || 'Analysis failed'); setApiStatus('error'); }
+            } else {
+              pollTimer = setTimeout(poll, 2000);
+            }
+          } catch (e) {
+            if (!cancelled) { setErrorMsg(e.message); setApiStatus('error'); }
+          }
+        };
+        poll();
+      } catch (e) {
+        if (!cancelled) { setErrorMsg(e.message); setApiStatus('error'); }
+      }
+    };
+
+    run();
+    return () => { cancelled = true; clearInterval(elapsedId); if (pollTimer) clearTimeout(pollTimer); };
   }, []);
 
-  const progress = (elapsed / total) * 100;
+  // Error screen
+  if (apiStatus === 'error') {
+    return (
+      <div className="fade-in" style={{ padding: "80px 32px", maxWidth: 560, margin: "0 auto", textAlign: "center" }}>
+        <span className="icon" style={{ fontSize: 48, color: "var(--bad)", display: "block", marginBottom: 20 }}>error_outline</span>
+        <h2 className="h1" style={{ marginBottom: 12 }}>{lang === "fr" ? "Analyse échouée" : "Analysis failed"}</h2>
+        <p style={{ color: "var(--muted)", marginBottom: 28, fontSize: 14 }}>{errorMsg}</p>
+        <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+          <Button kind="primary" icon="arrow_back" onClick={() => onNav("workspace")}>
+            {lang === "fr" ? "Réessayer" : "Try again"}
+          </Button>
+        </div>
+        <p style={{ marginTop: 20, fontSize: 12, color: "var(--muted-2)" }}>
+          {lang === "fr"
+            ? "Vérifiez que le backend est lancé sur http://localhost:8000"
+            : "Make sure the backend is running on http://localhost:8000"}
+        </p>
+      </div>
+    );
+  }
+
+  const progress = Math.min((elapsed / total) * 100, apiStatus === "done" ? 100 : 98);
   const fmt = (s) => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
 
-  // streaming transcript
-  const fullTranscript = lang === "fr"
+  // transcript display logic
+  const isDemo = apiStatus === "demo";
+  const demoFull = lang === "fr"
     ? "Bonjour à tous. Aujourd'hui je vais vous présenter NOOD, une plateforme qui transforme la manière dont nous nous entraînons à parler en public. Le problème est simple. La plupart d'entre nous improvisent leurs présentations sans aucun retour structuré."
     : "Hello everyone. Today I'm going to present NOOD, a platform that transforms how we train ourselves to speak in public. The problem is simple. Most of us improvise our presentations without any structured feedback.";
-  const visibleChars = Math.min(fullTranscript.length, Math.floor((elapsed - 10) * 8));
-  const transcript = visibleChars > 0 ? fullTranscript.slice(0, visibleChars) : "";
+  const demoChars = Math.min(demoFull.length, Math.floor((elapsed - 10) * 8));
+  const demoText  = demoChars > 0 ? demoFull.slice(0, demoChars) : "";
+  const realText  = transcript ? (transcript[lang] || transcript.en || transcript.fr || "") : null;
+  const shownText = isDemo ? demoText : (realText || "");
+  const wordCount = shownText ? shownText.split(/\s+/).filter(w => w).length : 0;
+  const showCursor = isDemo ? (elapsed > 10 && elapsed < total) : (apiStatus === "polling" && !realText);
 
   return (
     <div className="fade-in" style={{ padding: "48px 32px 64px", maxWidth: 1280, margin: "0 auto" }}>
@@ -112,11 +201,18 @@ function Processing({ onNav }) {
       <Card padding={20} style={{ marginBottom: 16, minHeight: 140 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
           <Eyebrow>{t("proc.transcript.live")}</Eyebrow>
-          {elapsed > 10 && <div className="num mono" style={{ color: "var(--muted)", fontSize: 11 }}>{Math.floor(transcript.split(" ").length / Math.max(1, elapsed/60) * 1)} mots</div>}
+          {wordCount > 0 && <div className="num mono" style={{ color: "var(--muted)", fontSize: 11 }}>{wordCount} {lang === "fr" ? "mots" : "words"}</div>}
         </div>
         <div style={{ fontSize: 14.5, lineHeight: 1.65, color: "var(--ink-soft)", fontFamily: "var(--body)", minHeight: 60 }}>
-          {transcript || <span style={{ color: "var(--muted-2)" }}>{lang === "fr" ? "En attente de la transcription…" : "Waiting for transcription…"}</span>}
-          {elapsed > 10 && elapsed < total && <span style={{ display: "inline-block", width: 7, height: 16, background: "var(--ink)", marginLeft: 2, verticalAlign: "middle", animation: "pulse 0.9s infinite" }} />}
+          {shownText
+            ? shownText
+            : <span style={{ color: "var(--muted-2)" }}>
+                {apiStatus === "uploading"
+                  ? (lang === "fr" ? "Envoi du fichier…" : "Uploading file…")
+                  : (lang === "fr" ? "En attente de la transcription…" : "Waiting for transcription…")}
+              </span>
+          }
+          {showCursor && <span style={{ display: "inline-block", width: 7, height: 16, background: "var(--ink)", marginLeft: 2, verticalAlign: "middle", animation: "pulse 0.9s infinite" }} />}
         </div>
       </Card>
 

@@ -1,191 +1,235 @@
-# NOOD — AI-Powered Soft Skills Coach for Moroccan Students
+# NOOD — AI Presentation Coach
 
-> *"A pocket AI coach that watches you speak and helps you get better — in Darija, in 3 minutes, on your phone."*
+NOOD analyzes a video of someone giving a presentation and grades them across three dimensions:
+- **Body language** — emotion detection from face + pose landmarks
+- **Speech** — speaking rate, filler words, pitch variation, energy, pauses, vocal emotion
+- **Tone–content fit** — does the delivery match what's being said?
 
----
-
-## Overview
-
-**NOOD** is a mobile-first AI coaching application designed to help Moroccan students develop the soft skills they are rarely taught in school — public speaking, communication, interview readiness, and self-expression.
-
-Moroccan students often graduate technically competent but unprepared for the communication demands of university presentations, thesis defenses, and job interviews. NOOD addresses this gap through short daily practice sessions, AI-powered feedback, and a gamified experience built for Gen Z.
-
-Think of it as **Duolingo for confidence** — localized for Morocco, available in Darija/French/Arabic, and accessible on any phone.
+It returns a JSON report and a 0–100 overall score with a letter grade. The frontend renders this as an interactive dashboard with a video player, timeline, and coaching tips.
 
 ---
 
-## The Problem
+## Architecture at a glance
 
-Students in Morocco's secondary and higher education system receive virtually no formal training in:
-
-- Speaking confidently in front of an audience
-- Structuring answers in interviews or oral exams
-- Managing presentation anxiety
-- Developing tone, clarity, and communication habits
-
-When they reach university, they are suddenly expected to deliver PFE defenses, group presentations, and job interviews — with no preparation. Existing self-help resources are too long, too theoretical, and not localized to the Moroccan context.
-
----
-
-## The Solution
-
-NOOD gives students a private AI coach available on their phone at any time.
-
-**Core flow:**
-1. The app sends a daily reminder with a speaking prompt
-2. The student records a short 1–3 minute audio response
-3. The AI analyzes their speech: filler words, speaking speed, tone, clarity, and structure
-4. The student receives a confidence score, specific feedback, and improvement tips
-5. Progress is tracked over time through a gamified dashboard
-
----
-
-## Target Users
-
-| Segment | Age | Context | Priority |
-|---|---|---|---|
-| University students | 18–25 | Presentations, PFE defenses, internship/job interviews | MVP |
-| High school students (lycée/bac) | 15–18 | Oral baccalaureate, building early confidence | V2 |
-| Young professionals / bootcamp graduates | 22–30 | Career growth, interview preparation | V2 |
-
----
-
-## MVP Features (Version 1.0)
-
-### 1. AI Communication Coach
-- Student records a short speaking video based on a daily prompt
-- AI analyzes audio: filler word count, speaking speed (WPM), pause frequency, volume consistency
-- Returns a confidence score (1–10) and 3 actionable improvement tips
-- Stores history so students can track progress over time
-
-### 2. AI Interview Simulator
-- Conversational interview practice (text or audio)
-- Student selects a scenario (e.g., "internship interview", "PFE defense", "first job")
-- AI asks questions one at a time and evaluates responses on clarity, structure, and relevance
-- Returns per-answer feedback and an overall session score
-
-### 3. Gamification
-- Daily streak counter
-- XP points and 5 progression levels (Beginner → Confident Speaker)
-- Badges (e.g., "First Recording", "7-Day Streak", "Interview Ready")
-- Progress dashboard with score trends
-
-### 4. Student Profile
-- Target career field and language preference (Darija / French / Arabic)
-- Progress view: exercises completed, scores over time, streaks
-- Push notification reminders for daily practice
-
----
-
-## Planned Future Features (V2+)
-
-| Feature | Reason for V2 |
-|---|---|
-| Video analysis (posture, eye contact, gestures) | Requires pose-estimation ML models and significant compute |
-| AI Personal Coach with personalized daily plans | Requires sufficient user history to personalize meaningfully |
-| Weekly Soft Skills Progress Report | Requires calibrated scoring models based on real user data |
-| AI Interviewer Personas (HR, technical, startup founder) | Straightforward prompt engineering — polish the base simulator first |
-| WhatsApp reminder integration | High-impact for Morocco but adds complexity |
-| Darija speech-to-text (production-grade) | No production-ready Darija ASR exists yet; use French STT in V1 |
-| University/institution dashboards (B2B) | Requires institutional partnerships and separate product surface |
-
----
-
-## Technical Stack
-
-### Mobile Application
-- **React Native** with **Expo SDK** (TypeScript)
-- Expo provides built-in camera, audio recording, push notifications, and over-the-air updates
-- Cross-platform iOS and Android from a single codebase
-
-### Backend
-- **Supabase** — authentication, PostgreSQL database, file storage, edge functions
-- **FastAPI** (Python) microservice for all AI processing, hosted on Railway
-
-### AI & Machine Learning
-| Capability | Tool | Notes |
-|---|---|---|
-| Speech-to-text | OpenAI Whisper API | Best multilingual support; Darija ~70–80% accuracy in V1 |
-| Filler word detection | Post-transcription text analysis | String matching on Whisper word-level timestamps |
-| Speaking speed | Word count / duration calculation | Pure arithmetic on Whisper output |
-| Confidence & tone analysis | GPT-4o (transcript + metrics prompt) | ~$0.01–0.03 per session |
-| Interview conversation | GPT-4o with structured system prompts | ~$0.02–0.05 per full session |
-| Video/posture analysis | MediaPipe | **Deferred to V2** |
-
-### Infrastructure
-| Layer | Tool |
-|---|---|
-| Database | PostgreSQL via Supabase |
-| Storage | Supabase Storage (S3-compatible) |
-| AI Microservice Hosting | Railway (~$5–7/month) |
-| Push Notifications | Expo Push Notifications |
-| Analytics | PostHog |
-| Error Tracking | Sentry |
-| CI/CD | GitHub Actions + Expo EAS |
-| Design | Figma |
-
----
-
-## System Architecture
 ```
-Mobile App (React Native / Expo)
-        │
-        ├── Supabase
-        │     ├── Auth (email + Google)
-        │     ├── PostgreSQL Database
-        │     ├── File Storage (video/audio)
-        │     └── Edge Functions
-        │
-        └── AI Microservice (FastAPI / Railway)
-              ├── OpenAI Whisper API  →  Transcript + word timestamps
-              ├── Filler Word Detector  →  Count + mapped timestamps
-              ├── Speaking Speed Analyzer  →  WPM per segment
-              └── GPT-4o  →  Confidence score + feedback + interview evaluation
+┌──────────────┐                ┌──────────────────────┐
+│   Browser    │  POST video    │   FastAPI backend    │
+│  (HTML/JSX)  │ ───────────▶   │     (port 8000)      │
+│              │  poll job_id   │                      │
+│              │ ◀───────────── │                      │
+└──────────────┘                └──────────┬───────────┘
+                                           │
+                                           ▼
+                                ┌──────────────────────┐
+                                │ presentation_         │
+                                │  analyzer.py          │
+                                │  (orchestrator)       │
+                                └──┬────────────────┬──┘
+                                   │ ThreadPool ×2  │
+                       ┌───────────▼──┐         ┌───▼──────────────┐
+                       │ Body         │         │ Speech           │
+                       │ Analysis     │         │ Analysis         │
+                       │              │         │                  │
+                       │ MediaPipe +  │         │ librosa VAD      │
+                       │ TFLite       │         │ Whisper ASR      │
+                       │ (9 emotions) │         │ pYIN prosody     │
+                       │              │         │ wav2vec2 emotion │
+                       └──────────────┘         └────────┬─────────┘
+                                                         │
+                                                         ▼
+                                                ┌─────────────────┐
+                                                │ Tone Analysis   │
+                                                │ (Pollinations   │
+                                                │  free LLM API)  │
+                                                └─────────────────┘
 ```
 
-**Core data flow:**
-1. Student records video/audio in the app
-2. File uploads to Supabase Storage
-3. Edge function triggers the AI microservice
-4. Microservice runs Whisper → filler detection → speed analysis → GPT-4o
-5. Results saved to PostgreSQL and returned to the app via Supabase Realtime
-6. Student sees score, feedback, and gamification updates
-
-### Full Sequence Diagram – Daily Practice + Interview Flow
-<image-card alt="NOOD Full Sequence Diagram" src="./diagrams/nood-daily-practice-sequence.svg" ></image-card>
+**Scoring**: 40 % speech + 30 % body + 30 % tone → 0–100 score → letter grade (A ≥ 85, B ≥ 70, C ≥ 55, D ≥ 40, F < 40).
 
 ---
 
-## Estimated Costs at Scale
+## Project layout
 
-| Item | Cost |
-|---|---|
-| Whisper STT | ~$0.006/min of audio |
-| GPT-4o feedback per session | ~$0.01–0.03 |
-| GPT-4o interview session (5–8 turns) | ~$0.02–0.05 |
-| Railway (AI microservice) | ~$5–7/month |
-| Supabase (free tier) | $0 up to 500MB / 50,000 MAU |
-| **Total per 1,000 daily active users** | **~$50–100/day** |
+```
+nood/
+├── backend/                     FastAPI server (the HTTP API)
+│   ├── main.py                  app entry, CORS
+│   ├── routers/analysis.py      POST /api/analyze, GET /api/analyze/{job_id}
+│   ├── routers/health.py        GET /health
+│   ├── services/pipeline.py     wraps presentation_analyzer in a thread pool
+│   ├── services/job_manager.py  in-memory job store (singleton)
+│   └── schemas/analysis.py      Pydantic request/response models
+│
+├── Body Analysis/               Body-language emotion detector
+│   ├── body_language_detector.py
+│   ├── body_language.tflite     trained model (9 classes)
+│   └── mediapipe_models/        downloaded on first run (~10 MB)
+│
+├── Speech Analysis/             Speech + tone analyzers
+│   ├── speech_analyzer.py       VAD + ASR + prosody + vocal emotion
+│   └── tone_analyzer.py         calls Pollinations LLM API
+│
+├── compat/torchaudio_compat.py  monkey-patch for torchaudio 2.2+
+│
+├── src/                         Frontend (no build step — JSX in browser via Babel)
+│   ├── i18n.jsx                 FR/EN translations
+│   ├── data.jsx                 mock data + API_BASE + mapApiReport()
+│   ├── components.jsx           Header, Card, Button, ScoreRing, etc.
+│   ├── app.jsx                  router
+│   └── screens/                 Landing, Auth, Workspace, Processing, Report, History
+│
+├── assets/                      logo + hero images
+├── data/                        sample report JSONs
+├── diagrams/                    architecture SVGs
+├── samples/                     local test videos (gitignored)
+├── hf_cache/                    HuggingFace model cache (gitignored, ~1.5 GB after first run)
+├── pretrained_models/           legacy SpeechBrain cache (gitignored)
+│
+├── presentation_analyzer.py     pipeline orchestrator (CLI entrypoint too)
+├── index.html                   frontend entry (loads all .jsx via Babel)
+├── tweaks-panel.jsx             dev-mode UI panel
+├── requirements.txt             pinned ML deps
+├── backend/requirements_api.txt FastAPI deps
+├── Dockerfile                   container image
+├── .dockerignore
+├── .gitignore
+├── CLAUDE.md                    deeper architecture notes for AI assistants
+├── reference.md                 detailed per-module reference
+└── README.md                    you are here
+```
 
 ---
 
-## Team
+## Run it locally
 
-This MVP is designed to be buildable by **2 technical co-founders** in 14–16 weeks.
+### Prerequisites
+- **Python 3.11** (3.10 also works)
+- **ffmpeg** as a system binary (used to extract audio from video)
+  - Windows: `winget install ffmpeg` or download from https://ffmpeg.org
+  - macOS: `brew install ffmpeg`
+  - Linux: `sudo apt install ffmpeg`
+- ~3 GB free disk for the ML models (downloaded on first analysis)
 
-| Role | Owner |
-|---|---|
-| Product + UX | Co-founder 1 |
-| React Native mobile app | Co-founder 1 |
-| Python AI microservice + backend | Co-founder 2 |
-| Figma design system | Freelance (optional, ~2,000–4,000 MAD one-time) |
+### Install dependencies
+```bash
+pip install -r requirements.txt
+pip install -r backend/requirements_api.txt
+```
+
+### Start the backend
+```bash
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
+Visit http://localhost:8000/docs for the auto-generated Swagger UI.
+Visit http://localhost:8000/health to check it's alive.
+
+### Start the frontend (separate terminal)
+```bash
+python -m http.server 3000
+```
+Open http://localhost:3000 in your browser.
+
+> The frontend is plain HTML + JSX compiled in-browser by Babel — **no `npm install`, no build step**. Just serve the folder over HTTP (you can't open `index.html` via `file://` because of CORS).
+
+### First-run notes
+The first video you analyze triggers downloads of:
+- `openai/whisper-base` (~140 MB) — speech-to-text
+- `ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition` (~1.2 GB) — vocal emotion
+- MediaPipe pose + face landmarker (~10 MB)
+
+These are cached in `hf_cache/` and `Body Analysis/mediapipe_models/`. Subsequent runs are fast.
 
 ---
 
-## Important: What We Will NOT Build in V1
+## API reference
 
-> Video analysis (posture, eye contact, gesture detection) will **not** be in the MVP.
+### `GET /health`
+```json
+{ "status": "ok", "active_jobs": 0 }
+```
 
-It requires frame-by-frame processing, GPU compute ($50–200/month), MediaPipe integration, and custom ML models — adding an estimated 6–8 weeks of development with unreliable results on phone-quality video. Audio analysis alone delivers 80% of the value at 20% of the complexity.
+### `POST /api/analyze`
+Multipart form upload.
 
-**Ship audio-first. Add video as a premium V2 feature.**
+| Field | Type | Description |
+|-------|------|-------------|
+| `file` | binary | Video file (mp4, mkv, mov, avi, webm, flv, wmv) |
+| `segment_duration` | int (query, optional) | Speech segment window in seconds (default 30) |
+
+**Response (HTTP 202)**:
+```json
+{ "job_id": "a050e202-605f-411c-9d89-a65554137950", "status": "queued" }
+```
+
+### `GET /api/analyze/{job_id}`
+Poll for status. Returns `queued` → `processing` → `done` (with full `report`) or `failed` (with `error`).
+
+```json
+{
+  "job_id": "...",
+  "status": "done",
+  "report": {
+    "overall_score": 72.5,
+    "overall_grade": "B",
+    "component_scores": { "speech_score": ..., "body_language_score": ..., "tone_fit_score": ... },
+    "body_language": { ... },
+    "speech": { ... },
+    "tone": { ... },
+    "timeline": [ ... ],
+    "analysis_errors": {}
+  }
+}
+```
+
+If one analyzer crashed, that component's scores are zero and `analysis_errors` lists what failed — the report is still produced (no all-or-nothing failure).
+
+---
+
+## CLI usage (skip the API)
+
+```bash
+python presentation_analyzer.py --video samples/sample_video.mp4
+python presentation_analyzer.py --video talk.mp4 --output my_report.json
+python presentation_analyzer.py --video talk.mp4 --segment-duration 30
+```
+
+Individual modules also run standalone:
+
+```bash
+python "Speech Analysis/speech_analyzer.py" audio.wav --json
+python "Speech Analysis/tone_analyzer.py" --demo            # no real audio
+python "Body Analysis/body_language_detector.py" --video v.mp4   # opens OpenCV window
+```
+
+---
+
+## Run with Docker
+
+```bash
+docker build -t nood-backend .
+docker volume create nood_models
+docker run -d --name nood -p 8000:8000 -v nood_models:/app/hf_cache nood-backend
+```
+
+The volume is essential — without it, the container re-downloads ~1.5 GB of models every restart.
+
+For deployment to Oracle Cloud (or any other VPS), see the deployment notes in `reference.md`.
+
+---
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `ffmpeg not found` | system binary missing | Install ffmpeg, ensure it's on PATH |
+| `[ERROR] body_language_detector failed` | no person/face visible in video | Use a video with a clearly visible speaker |
+| HuggingFace cache permission errors on Windows | corrupted cache folders | The project sets `HF_HOME` to local `hf_cache/`, not user profile — should not happen, but if it does, `rm -rf hf_cache/` and let it re-download |
+| Frontend shows mock data with no real upload | `window.PENDING_FILE` is null | Click "Analyze" with a real file picked, not "Try a sample" |
+| Browser blocks API calls (CORS) | backend not running | Start uvicorn first; check `/health` endpoint |
+| Backend serves but long pause then 500 | LLM tone analysis API timed out | Pollinations sometimes 30s+; the pipeline still returns body+speech if tone fails |
+
+---
+
+## License
+
+See `LICENSE` (MIT).

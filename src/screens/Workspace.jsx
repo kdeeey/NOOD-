@@ -10,14 +10,22 @@ function Workspace({ onNav, fileState, setFileState }) {
   const [script, setScript] = useState(fileState?.script || "");
   const [drag, setDrag] = useState(false);
   const inputRef = useRef(null);
+  const rawFileRef = useRef(null);
 
   const fakeFile = { name: "demo_day_pitch_v3.mp4", size: "47.2 MB", duration: "3:07" };
 
   const onPick = () => inputRef.current?.click();
-  const onFileSelected = (f) => { if (f) setFile({ name: f.name, size: `${(f.size/1024/1024).toFixed(1)} MB`, duration: "—" }); };
-  const useDemo = () => setFile(fakeFile);
+  const onFileSelected = (f) => {
+    if (f) {
+      rawFileRef.current = f;
+      setFile({ name: f.name, size: `${(f.size/1024/1024).toFixed(1)} MB`, duration: "—" });
+    }
+  };
+  const useDemo = () => { rawFileRef.current = null; setFile(fakeFile); };
 
   const start = () => {
+    window.PENDING_FILE = rawFileRef.current; // null → demo mode in Processing
+    window.LIVE_REPORT  = null;               // clear any previous real result
     setFileState({ file, kind, audience, goal, script });
     onNav("processing");
   };

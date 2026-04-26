@@ -335,6 +335,8 @@ def run_pipeline(
     body_result = None
     speech_tone_result = None
 
+    analysis_errors = {}
+
     with ThreadPoolExecutor(max_workers=2) as pool:
         future_body = pool.submit(_run_body_analysis, video_path)
         future_speech_tone = pool.submit(
@@ -349,17 +351,57 @@ def run_pipeline(
                 else:
                     speech_tone_result = result
             except Exception as e:
-                print(f"\n  [ERROR] Analyzer failed: {e}", file=sys.stderr)
                 import traceback
                 traceback.print_exc()
+                component = "body" if future is future_body else "speech_tone"
+                analysis_errors[component] = str(e)
+                print(f"\n  [ERROR] {component} analyzer failed: {e}", file=sys.stderr)
 
     # Clean up temp audio
     Path(tmp_audio).unlink(missing_ok=True)
 
-    if body_result is None or speech_tone_result is None:
-        print("\n  [FATAL] One or more analyzers failed. Cannot produce report.",
-              file=sys.stderr)
-        raise RuntimeError("Pipeline failed: one or more analyzers failed")
+    # Fall back to zero-value defaults so we can still produce a partial report
+    if body_result is None:
+        print("\n  [WARN] Body analysis failed — using zero defaults.", file=sys.stderr)
+        body_result = {
+            "summary": {
+                "dominant_emotion": "Unknown",
+                "dominant_emotion_pct": 0.0,
+                "total_frames_analyzed": 0,
+                "average_confidence": 0.0,
+                "emotion_distribution": {},
+                "duration_s": 0.0,
+            },
+            "frames": [],
+        }
+
+    if speech_tone_result is None:
+        print("\n  [WARN] Speech/tone analysis failed — using zero defaults.", file=sys.stderr)
+        speech_tone_result = {
+            "speech": {
+                "overall": 0.0, "grade": "F",
+                "wpm":             {"score": 0.0, "raw": 0.0, "unit": "wpm",   "label": "Speaking pace",    "feedback": "Analysis failed"},
+                "filler_rate":     {"score": 0.0, "raw": 0.0, "unit": "%",     "label": "Filler words",     "feedback": "Analysis failed"},
+                "pitch_variation": {"score": 0.0, "raw": 0.0, "unit": "CV",    "label": "Pitch variation",  "feedback": "Analysis failed"},
+                "energy_variation":{"score": 0.0, "raw": 0.0, "unit": "RMS σ", "label": "Energy variation", "feedback": "Analysis failed"},
+                "pause_ratio":     {"score": 0.0, "raw": 0.0, "unit": "%",     "label": "Pause ratio",      "feedback": "Analysis failed"},
+                "vocal_emotion":   {"score": 0.0, "raw": "unknown", "unit": "", "label": "Vocal emotion",   "feedback": "Analysis failed"},
+                "transcript_preview": "",
+                "segments": [],
+            },
+            "tone": {
+                "detected_topic": "",
+                "detected_context": "",
+                "overall_tone_fit": "unknown",
+                "tone_fit_score": 0.0,
+                "mismatches": [],
+                "coaching_tips": [],
+            },
+        }
+
+    if analysis_errors:
+        error_summary = "; ".join(f"{k}: {v}" for k, v in analysis_errors.items())
+        print(f"\n  [PARTIAL REPORT] Some analyzers failed: {error_summary}", file=sys.stderr)
 
     #scoring
     body_score = compute_body_language_score(body_result["summary"])
@@ -388,6 +430,7 @@ def run_pipeline(
             "pipeline_duration_s": round(time.time() - t_start, 2),
             "segment_duration": segment_duration,
         },
+        "analysis_errors": analysis_errors,
         "overall_score": overall_score,
         "overall_grade": overall_grade,
         "component_scores": {

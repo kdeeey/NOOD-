@@ -125,3 +125,127 @@ const HISTORY = [
 ];
 
 Object.assign(window, { REPORT, HISTORY });
+
+// ─── API Integration ────────────────────────────────────────────────────────
+
+const API_BASE = 'http://localhost:8000';
+window.API_BASE  = API_BASE;
+window.LIVE_REPORT  = null;   // set by Processing when real analysis completes
+window.PENDING_FILE = null;   // set by Workspace before navigating to Processing
+
+const EMOTION_COLORS = {
+  Happy: "#3CC58F", Excited: "#5B8DEF", Confused: "#E2A33A",
+  Tension: "#A06BD8", Surprised: "#E07AB0", Sad: "#7B7494",
+  Angry: "#C94B4B", Pain: "#D17B3F",
+};
+
+function gradeToLabel(grade) {
+  const map = { A: "Excellent", B: "Strong", C: "Developing", D: "Emerging", F: "Beginner" };
+  return map[(grade || "F")[0]] || "Developing";
+}
+
+// Converts the FastAPI report shape into the frontend REPORT shape.
+function mapApiReport(api, meta) {
+  const speech = api.speech || {};
+  const body   = api.body_language || {};
+  const bodySum = body.summary || {};
+  const tone   = api.tone || {};
+  const scores = api.component_scores || {};
+
+  const mapMarker = (m, opts = {}) => {
+    // Always return a valid object — never null — so Report.jsx never crashes
+    if (!m) return {
+      score: 0, raw: 0, unit: "", ideal: opts.ideal || null, range: opts.range || null,
+      label: { fr: "—", en: "—" }, feedback: { fr: "", en: "" },
+    };
+    return {
+      score:    m.score ?? 0,
+      raw:      opts.pct ? (m.raw * 100) : m.raw,
+      unit:     m.unit || "",
+      ideal:    opts.ideal || null,
+      range:    opts.range || null,
+      label:    { fr: m.label || "", en: m.label || "" },
+      feedback: { fr: m.feedback || "", en: m.feedback || "" },
+    };
+  };
+
+  const distribution = Object.entries(bodySum.emotion_distribution || {}).map(([label, pct]) => ({
+    label, pct, color: EMOTION_COLORS[label] || "#999",
+  }));
+
+  const mismatches = (tone.mismatches || []).map(m => ({
+    severity:     m.severity || "low",
+    moment_s:     0,
+    moment_label: { fr: m.moment || "", en: m.moment || "" },
+    observed:     { fr: m.observed_tone || "", en: m.observed_tone || "" },
+    expected:     { fr: m.expected_tone || "", en: m.expected_tone || "" },
+    reason:       { fr: m.reason || "",        en: m.reason || "" },
+  }));
+
+  const coaching_tips = (tone.coaching_tips || []).map((tip, i) => ({
+    impact:   i < 2 ? "high" : "medium",
+    moment_s: 0,
+    title:    { fr: tip, en: tip },
+    body:     { fr: "", en: "" },
+  }));
+
+  return {
+    meta: {
+      name:       { fr: meta.fileName || "Analyse", en: meta.fileName || "Analysis" },
+      date:       (api.meta || {}).generated_at || new Date().toISOString(),
+      duration_s: bodySum.duration_s || meta.duration_s || 0,
+      file:       meta.fileName || "",
+      fileSize:   meta.fileSize || "",
+    },
+    overall: {
+      score:       api.overall_score || 0,
+      grade:       api.overall_grade || "F",
+      proficiency: gradeToLabel(api.overall_grade),
+    },
+    prev:   REPORT.prev,
+    avg30:  REPORT.avg30,
+    components: {
+      voice:   Math.round(scores.speech_score        || 0),
+      body:    Math.round(scores.body_language_score || 0),
+      tone:    Math.round(scores.tone_fit_score      || 0),
+      content: Math.round(scores.speech_score        || 0),
+    },
+    body_language: {
+      dominant:      bodySum.dominant_emotion     || "",
+      dominant_pct:  bodySum.dominant_emotion_pct || 0,
+      frames_analyzed: bodySum.total_frames_analyzed || 0,
+      distribution,
+      interpretation: { fr: "", en: "" },
+      timeline: (body.frames || []).map(f => ({ t: f.timestamp_s, emotion: f.emotion })),
+    },
+    speech: {
+      grade: speech.grade || "F",
+      metrics: {
+        wpm:     mapMarker(speech.wpm,             { ideal: [120, 170], range: [80, 220] }),
+        fillers: mapMarker(speech.filler_rate,     { pct: true, ideal: [0, 3], range: [0, 12] }),
+        pitch:   mapMarker(speech.pitch_variation,  { ideal: [0.12, 0.24], range: [0, 0.40] }),
+        energy:  mapMarker(speech.energy_variation, { ideal: [0.020, 0.040], range: [0, 0.06] }),
+        pause:   mapMarker(speech.pause_ratio,     { pct: true, ideal: [10, 20], range: [0, 40] }),
+        emotion: mapMarker(speech.vocal_emotion),
+      },
+      transcript_preview: {
+        fr: speech.transcript_preview || "",
+        en: speech.transcript_preview || "",
+      },
+    },
+    tone: {
+      topic:    { fr: tone.detected_topic   || "", en: tone.detected_topic   || "" },
+      context:  { fr: tone.detected_context || "", en: tone.detected_context || "" },
+      fit:      tone.tone_fit_score || 0,
+      fit_label: {
+        fr: tone.overall_tone_fit === "appropriate" ? "Approprié" : "Partiellement approprié",
+        en: tone.overall_tone_fit || "appropriate",
+      },
+      mismatches,
+      coaching_tips,
+    },
+    language: REPORT.language,
+  };
+}
+
+window.mapApiReport = mapApiReport;

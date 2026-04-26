@@ -1,0 +1,33 @@
+# Don't copy these into the Docker image — keeps the image small and the build fast
+
+# Python build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Cached models (will be re-downloaded inside the container, on a docker volume)
+hf_cache/
+pretrained_models/
+Body Analysis/mediapipe_models/
+
+# Frontend (deployed separately to Cloudflare Pages, not needed in backend image)
+src/
+index.html
+assets/
+*.html
+
+# Streamlit demo (not used by the FastAPI backend)
+Streamlit + Whisper/
+
+# Dev / IDE / OS junk
+.git/
+.gitignore
+.vscode/
+.idea/
+.DS_Store
+node_modules/
+*.log
+*.tmp

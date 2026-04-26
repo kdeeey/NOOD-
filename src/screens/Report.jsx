@@ -2,7 +2,8 @@
 
 function Report({ onNav }) {
   const { t, lang } = useT();
-  const r = REPORT;
+  const r = window.LIVE_REPORT || REPORT;
+  const safeDur = Math.max(r.meta.duration_s, 1); // guard against 0 / missing duration
   const [tab, setTab] = useState("overview");
   const [videoT, setVideoT] = useState(0);
   const [playing, setPlaying] = useState(false);
@@ -10,9 +11,9 @@ function Report({ onNav }) {
 
   useEffect(() => {
     if (!playing) return;
-    const id = setInterval(() => setVideoT(t => Math.min(t + 0.25, r.meta.duration_s)), 250);
+    const id = setInterval(() => setVideoT(t => Math.min(t + 0.25, safeDur)), 250);
     return () => clearInterval(id);
-  }, [playing, r.meta.duration_s]);
+  }, [playing, safeDur]);
 
   const jumpTo = (s) => { setVideoT(s); setPlaying(true); };
   const fmt = (s) => `${Math.floor(s/60)}:${String(Math.floor(s%60)).padStart(2,'0')}`;
@@ -95,14 +96,14 @@ function Report({ onNav }) {
               <span className="icon" style={{ fontSize: 32, color: "var(--ink)" }}>{playing ? "pause" : "play_arrow"}</span>
             </button>
             <div style={{ position: "absolute", left: 16, top: 16, padding: "5px 10px", borderRadius: 999, background: "rgba(0,0,0,0.4)", backdropFilter: "blur(8px)", color: "white", fontSize: 11, fontWeight: 500 }}>
-              {fmt(videoT)} / {fmt(r.meta.duration_s)}
+              {fmt(videoT)} / {fmt(safeDur)}
             </div>
             {/* moment markers on the video */}
             <div style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: 4, background: "rgba(255,255,255,0.18)" }}>
-              <div style={{ width: `${(videoT / r.meta.duration_s) * 100}%`, height: "100%", background: "white" }} />
+              <div style={{ width: `${(videoT / safeDur) * 100}%`, height: "100%", background: "white" }} />
               {r.tone.coaching_tips.map((tip, i) => (
                 <div key={i} title={tip.title[lang]} onClick={() => jumpTo(tip.moment_s)} style={{
-                  position: "absolute", left: `${(tip.moment_s / r.meta.duration_s) * 100}%`,
+                  position: "absolute", left: `${(tip.moment_s / safeDur) * 100}%`,
                   top: -3, width: 10, height: 10, borderRadius: 999,
                   background: tip.impact === "high" ? "var(--bad)" : tip.impact === "medium" ? "var(--warn)" : "var(--muted-2)",
                   transform: "translateX(-50%)", border: "2px solid white", cursor: "pointer",
@@ -312,30 +313,39 @@ function Report({ onNav }) {
 }
 
 function TimelineLanes({ report, videoT, onSeek }) {
-  const dur = report.meta.duration_s;
+  const dur = Math.max(report.meta.duration_s, 1); // never divide by zero
+  const pct = Math.min(100, (videoT / dur) * 100);
   const lanes = [
-    { label: "BODY", values: report.body_language.timeline.map(f => ({ t: f.t, c: report.body_language.distribution.find(d => d.label === f.emotion)?.color || "#999" })) },
-    { label: "ENERGY", values: Array.from({ length: 60 }, (_, i) => ({ t: i * dur / 60, c: `rgba(15,8,102,${0.15 + Math.abs(Math.sin(i*0.5)) * 0.7})` })) },
-    { label: "PITCH", values: Array.from({ length: 60 }, (_, i) => ({ t: i * dur / 60, c: `rgba(107,92,255,${0.12 + Math.abs(Math.cos(i*0.4)) * 0.65})` })) },
+    { label: "BODY",   values: report.body_language.timeline.map(f => ({ c: report.body_language.distribution.find(d => d.label === f.emotion)?.color || "#ccc" })) },
+    { label: "ENERGY", values: Array.from({ length: 60 }, (_, i) => ({ c: `rgba(15,8,102,${0.15 + Math.abs(Math.sin(i*0.5)) * 0.7})` })) },
+    { label: "PITCH",  values: Array.from({ length: 60 }, (_, i) => ({ c: `rgba(107,92,255,${0.12 + Math.abs(Math.cos(i*0.4)) * 0.65})` })) },
   ];
   return (
-    <div onClick={(e) => {
-      const rect = e.currentTarget.getBoundingClientRect();
-      const x = (e.clientX - rect.left) / rect.width;
-      onSeek(x * dur);
-    }} style={{ cursor: "pointer", position: "relative" }}>
-      {lanes.map((lane, li) => (
-        <div key={li} style={{ display: "grid", gridTemplateColumns: "44px 1fr", gap: 8, alignItems: "center", marginBottom: 4 }}>
-          <span className="mono" style={{ fontSize: 9, color: "var(--muted)" }}>{lane.label}</span>
-          <div style={{ display: "flex", gap: 1, height: 14 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "44px 1fr", gap: 8, cursor: "pointer" }}>
+      {/* Labels column */}
+      <div>
+        {lanes.map((lane, li) => (
+          <div key={li} style={{ height: 14, marginBottom: li < lanes.length - 1 ? 4 : 0, display: "flex", alignItems: "center" }}>
+            <span className="mono" style={{ fontSize: 9, color: "var(--muted)" }}>{lane.label}</span>
+          </div>
+        ))}
+      </div>
+      {/* Track column — cursor is a simple % within this column */}
+      <div style={{ position: "relative" }} onClick={(e) => {
+        const rect = e.currentTarget.getBoundingClientRect();
+        const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+        onSeek(x * dur);
+      }}>
+        {lanes.map((lane, li) => (
+          <div key={li} style={{ display: "flex", gap: 1, height: 14, marginBottom: li < lanes.length - 1 ? 4 : 0 }}>
             {lane.values.map((v, i) => <div key={i} style={{ flex: 1, background: v.c, borderRadius: 1 }} />)}
           </div>
-        </div>
-      ))}
-      <div style={{
-        position: "absolute", left: `calc(44px + 8px + ${(videoT / dur) * 100}% * (100% - 52px) / 100% - 1px)`,
-        top: 0, bottom: 0, width: 2, background: "var(--ink)", pointerEvents: "none",
-      }} />
+        ))}
+        <div style={{
+          position: "absolute", left: `${pct}%`, top: 0, bottom: 0,
+          width: 2, background: "var(--ink)", transform: "translateX(-50%)", pointerEvents: "none",
+        }} />
+      </div>
     </div>
   );
 }
