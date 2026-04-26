@@ -1,0 +1,11 @@
+# =============================================================================
+# NOOD FastAPI Backend — Additional Dependencies
+# =============================================================================
+# Install alongside the main requirements.txt:
+#   pip install -r requirements.txt
+#   pip install -r backend/requirements_api.txt
+# =============================================================================
+
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+python-multipart>=0.0.9   # required for UploadFile support
