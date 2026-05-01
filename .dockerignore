@@ -7,6 +7,9 @@ __pycache__/
 *.pyd
 .Python
 *.egg-info/
+.venv/
+venv/
+env/
 
 # Cached models (will be re-downloaded inside the container, on a docker volume)
 hf_cache/
@@ -31,3 +34,21 @@ Streamlit + Whisper/
 node_modules/
 *.log
 *.tmp
+.env
+.env.local
+.env.*.local
+.pytest_cache/
+.mypy_cache/
+.coverage
+samples/
+*.mp4
+*.wav
+*.mkv
+*.mov
+*.webm
+DOCKERFILE
+railway.toml
+docker-compose.yml
+.gitattributes
+CLAUDE.md
+diagrams/

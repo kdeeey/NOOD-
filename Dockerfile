@@ -1,5 +1,5 @@
 # NOOD backend container
-# Multi-arch image: works on x86 (your laptop) and ARM (Oracle Cloud Ampere VM)
+# Multi-arch image: works on x86 (your laptop) and ARM (Railway VMs)
 
 FROM python:3.11-slim
 
@@ -23,11 +23,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install Python deps FIRST (separate layer = faster rebuilds when only code changes)
-COPY requirements.txt backend/requirements_api.txt ./
-RUN pip install --no-cache-dir -r requirements.txt -r requirements_api.txt
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy the rest of the project
 COPY . .
+
+# Expose port (for clarity; Railway uses PORT env var)
+EXPOSE 8000
+
+# Start FastAPI server
+# Railway sets PORT env var; fallback to 8080 if not set
+CMD ["sh", "-c", "uvicorn backend.main:app --host 0.0.0.0 --port ${PORT:-8080}"]
 
 # Backend listens on 8000
 EXPOSE 8000
